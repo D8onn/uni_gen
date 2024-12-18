@@ -1,52 +1,29 @@
 import * as THREE from "three";
 import WebGL from "three/addons/capabilities/WebGL.js";
+import { OrbitControls } from "three/examples/jsm/Addons.js";
+import { createUni } from "./utility/";
+
+let camera, renderer, scene;
+
 if (!WebGL.isWebGL2Available()) {
-	document
-		.getElementById("container")
-		.appendChild(WebGL.getWebGL2ErrorMessage());
+	document.getElementById("container").appendChild(WebGL.getWebGL2ErrorMessage());
 } else {
-	init();
+	createUni();
 }
 
 function init() {
-	const scene = new THREE.Scene();
-	scene.background = new THREE.Color(0x606968);
+	scene = new THREE.Scene();
 
-	const camera = new THREE.PerspectiveCamera(
+	camera = new THREE.PerspectiveCamera(
 		75,
 		window.innerWidth / window.innerHeight,
 		0.1,
 		1000
 	);
+	renderer = createRenderer();
 
-	const renderer = new THREE.WebGLRenderer({ antialias: true });
-	renderer.setSize(window.innerWidth, window.innerHeight);
-	document.body.appendChild(renderer.domElement);
+	scene.background = new THREE.Color(0x606968);
+	createAxis();
 
-	const colors = [];
-
-	const geometry = new THREE.SphereGeometry(8, 80, 80);
-	const material = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
-
-	// create sphere
-	const sphere = new THREE.Mesh(geometry, material);
-	scene.add(sphere);
-
-	// create edge lines for sphere
-	const edges = new THREE.EdgesGeometry(geometry);
-	const edgeMaterial = new THREE.LineBasicMaterial({ color: 0x000000 });
-	const edgeLines = new THREE.LineSegments(edges, edgeMaterial);
-	scene.add(edgeLines);
-
-	camera.position.z = 20;
-
-	renderer.setAnimationLoop(animate);
-
-	function animate() {
-		renderer.render(scene, camera);
-		sphere.rotation.x += 0.001;
-		sphere.rotation.y -= 0.001;
-		edgeLines.rotation.x += 0.001;
-		edgeLines.rotation.y -= 0.001;
-	}
+	window.addEventListener("resize", onWindowResize);
 }
