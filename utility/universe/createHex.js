@@ -45,12 +45,6 @@ export function createHexagonEdges(radius, detail) {
 	}
 	console.log(group);
 
-	// const [geometry, wire] = createFirstGeometry(radius, detail);
-	// const geoMaterial = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
-	// const sphere = new THREE.Mesh(geometry, geoMaterial);
-	// sphere.material.transparent = false;
-	// sphere.material.opacity = 1;
-
 	// const wireframe = new THREE.LineSegments(wire);
 	// wireframe.material.opacity = 0.75;
 	// wireframe.material.transparent = true;

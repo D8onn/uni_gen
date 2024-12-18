@@ -1,14 +1,14 @@
 import * as THREE from "three";
 import WebGL from "three/addons/capabilities/WebGL.js";
 import { OrbitControls } from "three/examples/jsm/Addons.js";
-import { createUni } from "./utility/";
+import { createUni, createPlanet } from "./utility/";
 
 let camera, renderer, scene;
 
 if (!WebGL.isWebGL2Available()) {
 	document.getElementById("container").appendChild(WebGL.getWebGL2ErrorMessage());
 } else {
-	createUni();
+	createPlanet();
 }
 
 function init() {
