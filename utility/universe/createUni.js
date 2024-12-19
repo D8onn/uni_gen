@@ -1,12 +1,6 @@
 import * as THREE from "three";
 import { createHexagonEdges } from "./createHex.js";
-import {
-	createAxis,
-	createControls,
-	createRenderer,
-	onWindowResize,
-} from "../sceneHelpers.js";
-import { OrbitControls } from "three/examples/jsm/Addons.js";
+import { createAxis, createControls, createRenderer } from "../sceneHelpers.js";
 
 let scene, renderer, camera;
 export function createUni() {
@@ -23,7 +17,7 @@ export function createUni() {
 	scene.background = new THREE.Color(0x606968);
 	createAxis(scene);
 
-	window.addEventListener("resize", onWindowResize(camera, renderer));
+	window.addEventListener("resize", onWindowResize);
 
 	// initial camera position
 	camera.position.set(20, 2, 0);
@@ -46,4 +40,10 @@ export function createUni() {
 		// sphere.rotation.x += 0.001;
 		// sphere.rotation.y -= 0.001;
 	}
+}
+
+function onWindowResize() {
+	camera.aspect = window.innerWidth / window.innerHeight;
+	camera.updateProjectionMatrix();
+	renderer.setSize(window.innerWidth, window.innerHeight);
 }
