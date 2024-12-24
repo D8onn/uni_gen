@@ -2,29 +2,23 @@ import * as THREE from "three";
 import { createMap } from "./createMap";
 import { createAxis, createControls, createRenderer } from "../sceneHelpers.js";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
-import GUI from "three/examples/jsm/libs/lil-gui.module.min.js";
 import { RGBELoader } from "three/examples/jsm/Addons.js";
 
 let biomes = {
-	0: "Tropical",
-	1: "Temperate",
-	2: "Taiga",
-	3: "Chaparral",
-	4: "Savannas",
-	5: "Temperate Grassland",
-	6: "Hot Desert",
-	7: "Cold Desert",
-	8: "Arctic Tundra",
-	9: "Alpine Tundra",
-	10: "Ice Caps",
-	11: "Freshwater",
-	12: "Ocean",
+	0: "Water",
+	1: "Mountains",
+	2: "Grasslands",
+	3: "Forest",
+	4: "Beaches",
+	5: "Desert",
+	6: "Taiga",
+	7: "Chaparral",
 };
 
 let colors = new Map();
-let height = 40;
-let width = 40;
-let landHeight = 3;
+let height = 60;
+let width = 60;
+let landHeight = 5;
 
 let scene, camera, renderer, envmap;
 
@@ -54,7 +48,6 @@ export async function createPlanet() {
 		.setDataType(THREE.FloatType)
 		.loadAsync("../../assets/lakeside_sunrise_4k.hdr");
 	envmap = pmrem.fromEquirectangular(envmapTexture).texture;
-	///////////////////////////////////////////////////////////////
 
 	///////////////////////////////////////////////////
 	// This is where creating the planet map is done //
@@ -77,7 +70,7 @@ export async function createPlanet() {
 	scene.add(light);
 	scene.add(light.target);
 
-	const skyColor = 0xf4c10b; // light blue
+	const skyColor = 0xffffff; // light blue
 	const groundColor = 0xb97a20; // brownish orange
 	const hemiLight = new THREE.HemisphereLight(skyColor, groundColor, intensity);
 	scene.add(hemiLight);
@@ -96,23 +89,57 @@ export async function createPlanet() {
 
 function buildMap(scene, planetMap) {
 	const radius = 0.5;
-	var hexagonGeometries = new THREE.BoxGeometry(0, 0, 0);
 	var waterGeo = new THREE.BoxGeometry(0, 0, 0);
+	var grasslandGeo = new THREE.BoxGeometry(0, 0, 0);
+	var forestGeo = new THREE.BoxGeometry(0, 0, 0);
+	var desertGeo = new THREE.BoxGeometry(0, 0, 0);
+	var beachGeo = new THREE.BoxGeometry(0, 0, 0);
+	var mountainGeo = new THREE.BoxGeometry(0, 0, 0);
+	var taigaGeo = new THREE.BoxGeometry(0, 0, 0);
+	var chaparralGeo = new THREE.BoxGeometry(0, 0, 0);
 
 	planetMap.forEach((val, key) => {
 		const geometry = new THREE.CylinderGeometry(radius, radius, val.height, 6);
 		geometry.translate(...findPosition(val, radius));
 
-		if (val.biome == 12) {
+		if (val.biome == biomes[0]) {
 			waterGeo = mergeGeometries([waterGeo, geometry]);
+		} else if (val.biome == biomes[1]) {
+			mountainGeo = mergeGeometries([mountainGeo, geometry]);
+		} else if (val.biome == biomes[2]) {
+			grasslandGeo = mergeGeometries([grasslandGeo, geometry]);
+		} else if (val.biome == biomes[3]) {
+			forestGeo = mergeGeometries([forestGeo, geometry]);
+		} else if (val.biome == biomes[4]) {
+			beachGeo = mergeGeometries([beachGeo, geometry]);
+		} else if (val.biome == biomes[5]) {
+			desertGeo = mergeGeometries([desertGeo, geometry]);
+		} else if (val.biome == biomes[6]) {
+			taigaGeo = mergeGeometries([taigaGeo, geometry]);
+		} else if (val.biome == biomes[7]) {
+			chaparralGeo = mergeGeometries([chaparralGeo, geometry]);
 		} else {
-			hexagonGeometries = mergeGeometries([hexagonGeometries, geometry]);
 		}
 	});
 
-	var restMesh = createMesh(hexagonGeometries, colors.get(biomes[2]));
-	var waterMesh = createMesh(waterGeo, colors.get(biomes[12]));
-	scene.add(restMesh, waterMesh);
+	var waterMesh = createMesh(waterGeo, colors.get(biomes[0]));
+	var mountainMesh = createMesh(mountainGeo, colors.get(biomes[1]));
+	var grasslandMesh = createMesh(grasslandGeo, colors.get(biomes[2]));
+	var forestMesh = createMesh(forestGeo, colors.get(biomes[3]));
+	var beachMesh = createMesh(beachGeo, colors.get(biomes[4]));
+	var desertMesh = createMesh(desertGeo, colors.get(biomes[5]));
+	var taigaMesh = createMesh(taigaGeo, colors.get(biomes[6]));
+	var chaparralMesh = createMesh(chaparralGeo, colors.get(biomes[7]));
+	scene.add(
+		waterMesh,
+		mountainMesh,
+		grasslandMesh,
+		forestMesh,
+		beachMesh,
+		desertMesh,
+		taigaMesh,
+		chaparralMesh
+	);
 }
 
 function createMesh(geo, mat) {
@@ -124,9 +151,9 @@ function createMesh(geo, mat) {
 
 function setUpBiomesColor() {
 	colors.set(
-		"Tropical",
+		"Forest",
 		new THREE.MeshStandardMaterial({
-			color: 0x20dfbd,
+			color: 0x0b620d,
 			envMap: envmap,
 			flatShading: true,
 			roughness: 0.25,
@@ -156,7 +183,7 @@ function setUpBiomesColor() {
 	colors.set(
 		"Chaparral",
 		new THREE.MeshStandardMaterial({
-			color: 0x89b847,
+			color: 0xd5d12a,
 			envMap: envmap,
 			flatShading: true,
 			roughness: 0.25,
@@ -164,9 +191,9 @@ function setUpBiomesColor() {
 		})
 	);
 	colors.set(
-		"Savannas",
+		"Beaches",
 		new THREE.MeshStandardMaterial({
-			color: 0xd2d728,
+			color: 0xc2b280,
 			envMap: envmap,
 			flatShading: true,
 			roughness: 0.25,
@@ -174,7 +201,7 @@ function setUpBiomesColor() {
 		})
 	);
 	colors.set(
-		"Temperate Grassland",
+		"Grasslands",
 		new THREE.MeshStandardMaterial({
 			color: 0x6cc936,
 			envMap: envmap,
@@ -184,9 +211,9 @@ function setUpBiomesColor() {
 		})
 	);
 	colors.set(
-		"Hot Desert",
+		"Desert",
 		new THREE.MeshStandardMaterial({
-			color: 0xd38b2c,
+			color: 0x9c4914,
 			envMap: envmap,
 			flatShading: true,
 			roughness: 0.25,
@@ -194,29 +221,9 @@ function setUpBiomesColor() {
 		})
 	);
 	colors.set(
-		"Cold Desert",
+		"Mountains",
 		new THREE.MeshStandardMaterial({
-			color: 0x72858d,
-			envMap: envmap,
-			flatShading: true,
-			roughness: 0.25,
-			metalness: 0.25,
-		})
-	);
-	colors.set(
-		"Arctic Tundra",
-		new THREE.MeshStandardMaterial({
-			color: 0xc9f1fa,
-			envMap: envmap,
-			flatShading: true,
-			roughness: 0.25,
-			metalness: 0.25,
-		})
-	);
-	colors.set(
-		"Alpine Tundra",
-		new THREE.MeshStandardMaterial({
-			color: 0xdeffbb,
+			color: 0xfffafa,
 			envMap: envmap,
 			flatShading: true,
 			roughness: 0.25,
@@ -233,18 +240,9 @@ function setUpBiomesColor() {
 			metalness: 0.25,
 		})
 	);
+
 	colors.set(
-		"Freshwater",
-		new THREE.MeshStandardMaterial({
-			color: 0x2982d6,
-			envMap: envmap,
-			flatShading: true,
-			roughness: 0.25,
-			metalness: 0.25,
-		})
-	);
-	colors.set(
-		"Ocean",
+		"Water",
 		new THREE.MeshStandardMaterial({
 			color: 0x4e51f8,
 			envMap: envmap,
