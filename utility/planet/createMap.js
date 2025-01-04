@@ -12,6 +12,8 @@ let biomes = {
 };
 
 let landHeight = 5;
+let waterThreshold = 0.1;
+let mountainsThreshold = 0.9;
 
 class Hex {
 	constructor(x, y, height = 1) {
@@ -30,7 +32,7 @@ let validAdjacentBiomes = {
 	Water: ["Beaches"],
 	Beaches: ["Grasslands", "Forest"],
 	Grasslands: ["Forest", "Grasslands"],
-	Forest: ["Forest", "Grasslands", "Taiga", "Chaparral"],
+	Forest: ["Forest", "Grasslands", "Chaparral"],
 	Taiga: ["Taiga", "Forest", "Chaparral"],
 	Chaparral: ["Chaparral", "Forest", "Desert"],
 	Mountains: ["Taiga", "Mountains"],
@@ -62,7 +64,6 @@ function modifyBiomes(hexagons) {
 		var biomes = [];
 		neighbors.forEach((neighbor) => {
 			if (Object.keys(neighborsBiomes).includes(neighbor.biome)) {
-				console.log("found");
 				neighborsBiomes[neighbor.biome]++;
 			} else {
 				neighborsBiomes[neighbor.biome] = 1;
@@ -95,10 +96,10 @@ function buildMap(width = 10, height = 10) {
 
 			hex.setHeight(h);
 
-			if (hex.height < landHeight * 0.11) {
+			if (hex.height < landHeight * waterThreshold) {
 				// water level
 				hex.biome = biomes[0];
-			} else if (hex.height > landHeight * 0.9) {
+			} else if (hex.height > landHeight * mountainsThreshold) {
 				// mountains level
 				hex.biome = biomes[1];
 			} else {
@@ -149,15 +150,11 @@ function setBiomes(hexagons) {
 		if (possibleBiomes.length == 0) break;
 
 		if (prevLength == possibleBiomes.size) {
-			console.log("no biome changes");
 			allowableNoChangeInterval--;
 		} else {
 			allowableNoChangeInterval = 10;
 		}
 		if (allowableNoChangeInterval == 0) {
-			console.log(
-				"No more biomes to change with there still being undefined biomes"
-			);
 			break;
 		}
 	}

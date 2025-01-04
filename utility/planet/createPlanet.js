@@ -2,7 +2,12 @@ import * as THREE from "three";
 import { createMap } from "./createMap";
 import { createAxis, createControls, createRenderer } from "../sceneHelpers.js";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
-import { RGBELoader } from "three/examples/jsm/Addons.js";
+import {
+	GLTFLoader,
+	MTLLoader,
+	OBJLoader,
+	RGBELoader,
+} from "three/examples/jsm/Addons.js";
 
 let biomes = {
 	0: "Water",
@@ -19,6 +24,7 @@ let colors = new Map();
 let height = 60;
 let width = 60;
 let landHeight = 5;
+let tree = null;
 
 let scene, camera, renderer, envmap;
 
@@ -46,14 +52,22 @@ export async function createPlanet() {
 	var pmrem = new THREE.PMREMGenerator(renderer);
 	var envmapTexture = await new RGBELoader()
 		.setDataType(THREE.FloatType)
-		.loadAsync("../../assets/lakeside_sunrise_4k.hdr");
+		.loadAsync("assets/lakeside_sunrise_4k.hdr");
 	envmap = pmrem.fromEquirectangular(envmapTexture).texture;
+
+	// creates the tree object for the forests
+	// asset from: https://michaelsgamelab.itch.io/rpg-cabin-models
+	var loader = new GLTFLoader();
+	var gltf = await loader.loadAsync("assets/tree.glb", (prg) => {});
+	tree = gltf.scene;
+	tree.scale.set(0.3, 0.5, 0.3);
 
 	///////////////////////////////////////////////////
 	// This is where creating the planet map is done //
 	setUpBiomesColor();
 
 	var planetMap = createMap(width, height);
+	console.log(planetMap);
 
 	// create lighting
 	const color = 0xffffff;
@@ -109,6 +123,16 @@ function buildMap(scene, planetMap) {
 		} else if (val.biome == biomes[2]) {
 			grasslandGeo = mergeGeometries([grasslandGeo, geometry]);
 		} else if (val.biome == biomes[3]) {
+			// TODO: make it random a tree will show on any forest hexagon
+			const num = THREE.MathUtils.randFloat(0, 1);
+			if (num < 0.05) {
+				var newTree = tree.clone();
+				var position = [...findPosition(val, radius)];
+				position[1] *= 2;
+				newTree.position.set(...position);
+				scene.add(newTree);
+			}
+
 			forestGeo = mergeGeometries([forestGeo, geometry]);
 		} else if (val.biome == biomes[4]) {
 			beachGeo = mergeGeometries([beachGeo, geometry]);
