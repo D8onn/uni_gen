@@ -12,6 +12,7 @@ const biomeColors = new Map([
 	["Desert", 0xc88a4c],
 	["Taiga", 0x71908b],
 	["Chaparral", 0xa4a05a],
+	["River", 0x5aa9d6],
 ]);
 
 const up = new THREE.Vector3(0, 1, 0);
@@ -29,7 +30,7 @@ export async function createPlanet({
 	radius = 10,
 	seed = createRandomSeed(),
 } = {}) {
-	const globe = createGlobeMap({ poleToPoleCells, seed });
+	const globe = createGlobeMap({ poleToPoleCells, seed, radius });
 	const scene = new THREE.Scene();
 	const camera = new THREE.PerspectiveCamera(
 		50,
@@ -105,7 +106,7 @@ function addGlobeSurface(scene, globe, radius) {
 	);
 
 	for (const cell of globe.cells) {
-		const positions = positionsByBiome.get(cell.biome);
+		const positions = positionsByBiome.get(cell.hasRiver ? "River" : cell.biome);
 		const center = cell.center.clone().multiplyScalar(radius + cell.surfaceElevation);
 		for (let index = 0; index < cell.boundaryFaceIds.length; index++) {
 			let pointA = facePositions[cell.boundaryFaceIds[index]];
