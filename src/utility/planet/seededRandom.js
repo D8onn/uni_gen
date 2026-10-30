@@ -8,3 +8,11 @@ export function createSeededRandom(seed) {
 		return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
 	};
 }
+
+export function createRandomSeed() {
+	const values = new Uint32Array(1);
+	if (globalThis.crypto?.getRandomValues) {
+		return globalThis.crypto.getRandomValues(values)[0];
+	}
+	return Math.floor(Math.random() * 0x100000000);
+}

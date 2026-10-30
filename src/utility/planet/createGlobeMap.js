@@ -300,6 +300,10 @@ export function createGlobeMap({
 			return sum + Math.acos(clamp(dot, -1, 1));
 		}, 0) / edges.length;
 
+	// The world is plain data: Three.js math stays internal and centers leave as [x, y, z].
+	for (const cell of cells) cell.center = cell.center.toArray();
+	for (const face of faces) face.center = face.center.toArray();
+
 	return {
 		seed: normalizedSeed,
 		radius,

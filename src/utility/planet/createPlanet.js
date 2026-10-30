@@ -3,28 +3,10 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { createControls, createRenderer } from "../sceneHelpers.js";
 import { createGlobeMap } from "./createGlobeMap.js";
 import { addLighting } from "./lighting.js";
-
-const biomeColors = new Map([
-	["Water", 0x347caa],
-	["Mountains", 0x9ca5aa],
-	["Grasslands", 0x78ad4d],
-	["Forest", 0x28663d],
-	["Beaches", 0xdac78f],
-	["Desert", 0xc88a4c],
-	["Taiga", 0x71908b],
-	["Chaparral", 0xa4a05a],
-	["River", 0x5aa9d6],
-]);
+import { buildPlanetMeshData } from "./planetMeshData.js";
+import { createRandomSeed } from "./seededRandom.js";
 
 const up = new THREE.Vector3(0, 1, 0);
-
-function createRandomSeed() {
-	const values = new Uint32Array(1);
-	if (globalThis.crypto?.getRandomValues) {
-		return globalThis.crypto.getRandomValues(values)[0];
-	}
-	return Math.floor(Math.random() * 0x100000000);
-}
 
 export async function createPlanet({
 	poleToPoleCells = 80,
@@ -71,8 +53,9 @@ export async function createPlanet({
 			: toLambert(object.material);
 	});
 	gltf.scene.scale.set(0.1, 0.16, 0.1);
-	addGlobeSurface(scene, globe, radius);
-	addTrees(scene, globe, gltf.scene, radius);
+	const meshData = buildPlanetMeshData(globe);
+	addGlobeSurface(scene, meshData);
+	addTrees(scene, meshData, gltf.scene);
 
 	addLighting(scene, camera);
 
@@ -91,49 +74,11 @@ export async function createPlanet({
 	};
 }
 
-function addGlobeSurface(scene, globe, radius) {
-	const facePositions = globe.faces.map((face) => {
-		const averageElevation =
-			face.cellIds.reduce((sum, id) => sum + globe.cells[id].surfaceElevation, 0) /
-			face.cellIds.length;
-		return face.center.clone().multiplyScalar(radius + averageElevation);
-	});
-	const positionsByBiome = new Map(
-		[...biomeColors.keys()].map((biome) => [biome, []])
-	);
-
-	for (const cell of globe.cells) {
-		const positions = positionsByBiome.get(cell.hasRiver ? "River" : cell.biome);
-		const center = cell.center.clone().multiplyScalar(radius + cell.surfaceElevation);
-		for (let index = 0; index < cell.boundaryFaceIds.length; index++) {
-			let pointA = facePositions[cell.boundaryFaceIds[index]];
-			let pointB =
-				facePositions[cell.boundaryFaceIds[(index + 1) % cell.boundaryFaceIds.length]];
-			const normal = new THREE.Vector3().crossVectors(
-				new THREE.Vector3().subVectors(pointA, center),
-				new THREE.Vector3().subVectors(pointB, center)
-			);
-			if (normal.dot(center) < 0) [pointA, pointB] = [pointB, pointA];
-			positions.push(
-				center.x,
-				center.y,
-				center.z,
-				pointA.x,
-				pointA.y,
-				pointA.z,
-				pointB.x,
-				pointB.y,
-				pointB.z
-			);
-		}
-	}
-
-	for (const [biome, positions] of positionsByBiome) {
-		if (positions.length === 0) continue;
+function addGlobeSurface(scene, meshData) {
+	for (const { color, positions } of meshData.surfaces) {
 		const geometry = new THREE.BufferGeometry();
 		geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
 		geometry.computeVertexNormals();
-		const color = biomeColors.get(biome);
 		const material = new THREE.MeshLambertMaterial({ color });
 		const mesh = new THREE.Mesh(geometry, material);
 		mesh.castShadow = false;
@@ -141,15 +86,11 @@ function addGlobeSurface(scene, globe, radius) {
 		scene.add(mesh);
 	}
 
-	const edgePositions = [];
-	for (const edge of globe.edges) {
-		for (const faceId of [edge.faceA, edge.faceB]) {
-			const point = facePositions[faceId].clone().multiplyScalar(1.0005);
-			edgePositions.push(point.x, point.y, point.z);
-		}
-	}
 	const edgeGeometry = new THREE.BufferGeometry();
-	edgeGeometry.setAttribute("position", new THREE.Float32BufferAttribute(edgePositions, 3));
+	edgeGeometry.setAttribute(
+		"position",
+		new THREE.Float32BufferAttribute(meshData.edgePositions, 3)
+	);
 	const edges = new THREE.LineSegments(
 		edgeGeometry,
 		new THREE.LineBasicMaterial({ color: 0x142019, transparent: true, opacity: 0.55 })
@@ -158,13 +99,11 @@ function addGlobeSurface(scene, globe, radius) {
 	scene.add(edges);
 }
 
-function addTrees(scene, globe, treeModel, radius) {
-	for (const cell of globe.cells) {
-		if (!cell.hasTree) continue;
+function addTrees(scene, meshData, treeModel) {
+	for (const { position, normal } of meshData.trees) {
 		const tree = treeModel.clone(true);
-		const normal = cell.center.clone();
-		tree.position.copy(normal).multiplyScalar(radius + cell.surfaceElevation + 0.025);
-		tree.quaternion.setFromUnitVectors(up, normal);
+		tree.position.fromArray(position);
+		tree.quaternion.setFromUnitVectors(up, new THREE.Vector3().fromArray(normal));
 		scene.add(tree);
 	}
 }
