@@ -51,6 +51,25 @@ Each cell stores `temperature` and `moisture` (`src/utility/planet/climate.js`),
 - **Default parameters** (`DEFAULT_PRODUCER`): uptake water 0.05 and nutrients 0.02 per unit of biomass per tick, `growthRate` 0.2, `maintenance` 0.05, `maxBiomass` 1, `reproductionBiomass` 0.6, `offspringBiomass` 0.2, `reproductionChance` 0.5, `minBiomass` 0.05, `maxAge` 400, `mortalityChance` 0.01, `maxPerCell` 50, `maxOrganisms` 100000. Any can be overridden through `species`. On a fully productive cell (temperature and moisture 1), nutrients run out and the population settles after about 100 ticks to between 3 and 14 organisms (usually 7–10), well below the per-cell cap.
 - **Inspection:** `getPopulationSummary(population)` returns `{ tick, count, totalBiomass, occupiedCells, lastTick, totals }`, where `lastTick` and `totals` hold `births` and `deaths` by cause; `getCellOrganisms(population, cellId)` returns copies of one cell's organisms. Invalid seeds, counts, species parameters, tick counts, or cell ids throw a `RangeError`.
 
+## Biome Classification
+
+Each cell's biome (`src/utility/planet/biomes.js`) comes from its own terrain and climate, checked in this order. Elevation levels are fractions of the maximum elevation (0.45 render units); temperature and moisture are the indices above.
+
+| Biome | Environmental range |
+| --- | --- |
+| Water | elevation below -0.175 |
+| Mountains | elevation above 0.72 |
+| Beaches | land touching water, elevation below 0.15, temperature at least 0.3 |
+| Taiga | temperature below 0.3 (any moisture) |
+| Forest | moisture at least 0.62 |
+| Desert | temperature at least 0.55, moisture below 0.27 |
+| Chaparral | temperature at least 0.55, moisture 0.27 to 0.45 |
+| Grasslands | everything else: temperature 0.3 to 0.55 with moisture below 0.62, or temperature at least 0.55 with moisture 0.45 to 0.62 |
+
+Transitions: Water, Mountains, and Beaches come from terrain and may border any biome. Two climate biomes may border each other only if their ranges touch: Taiga–Grasslands, Taiga–Forest, Grasslands–Forest, Grasslands–Desert, Grasslands–Chaparral, and Desert–Chaparral. Where a sharp climate change puts any other pair side by side (most often Chaparral next to Forest across a rain shadow or coast), both cells become Grasslands, which borders every biome, as an ecotone. This one refinement pass reads only the unrefined biomes, so it does not depend on cell order; it changes about 2% of cells at 80 cells pole-to-pole. River cells keep their biome and are drawn in their own color; every biome has a color in `planetMeshData.js`.
+
+Simplifications: Taiga stands in for all cold land (there is no tundra or ice), and Grasslands covers both cool steppe and warm savanna.
+
 ## Assets
 
 Tree Assets from: https://michaelsgamelab.itch.io/rpg-cabin-models
