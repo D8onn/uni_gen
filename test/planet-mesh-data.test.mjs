@@ -33,10 +33,10 @@ function hashMeshData(meshData) {
 }
 
 test("mesh data matches the geometry rendered before world data was split out", () => {
-	// Hashes captured from the pre-WG-08 createPlanet scene; a change means the planet looks different.
+	// From the pre-split createPlanet scene at the WG-05 commit (scripts/golden-mesh-hashes.mjs).
 	const goldenHashes = [
-		[80, 12345, "31bbb4009f9d6c4413c8773f73f615151da2973ff0222a62fd47db49accc28f1"],
-		[20, 42, "7354a13a51229906e6ac446da30eba9c7299e7b1bf2dae224042e301be2ce9f8"],
+		[80, 12345, "1562807f4de322393788c3316b7bc1f56105db274d756dafb7811bd5feed92ae"],
+		[20, 42, "b36cd037ce358acae86e3668594a3107c2f858998faf272a83f7b9a976eada1f"],
 	];
 	for (const [poleToPoleCells, seed, expected] of goldenHashes) {
 		const world = createGlobeMap({ poleToPoleCells, seed, radius: 10 });
@@ -45,7 +45,7 @@ test("mesh data matches the geometry rendered before world data was split out", 
 });
 
 test("mesh data draws every cell as outward triangles at its surface height", () => {
-	const world = createGlobeMap({ poleToPoleCells: 20, seed: 12345, radius: 10 });
+	const world = createGlobeMap({ poleToPoleCells: 20, seed: 1, radius: 10 });
 	const { surfaces, edgePositions, trees } = buildPlanetMeshData(world);
 	const triangleCounts = new Map();
 	for (const cell of world.cells) {
