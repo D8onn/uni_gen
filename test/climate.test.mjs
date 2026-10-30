@@ -63,8 +63,14 @@ test("prevailing winds follow trade, westerly, and polar bands and vanish at the
 test("air dries out downwind across a flat continent, so the leeward coast is drier", () => {
 	// Trade winds blow toward decreasing ids here: cell 1 is the leeward coast, the last cell the windward one.
 	const ring = createRing(new Array(15).fill(0.05));
-	const { humidity, moisture } = calculateClimate(ring, { maxElevation: MAX_ELEVATION });
+	const { humidity, moisture, humidityPasses, humidityConverged } = calculateClimate(ring, {
+		maxElevation: MAX_ELEVATION,
+	});
 	const downwind = ring.slice(1, 16).map(({ id }) => id).reverse();
+
+	// Air advances one cell per pass, so 15 cells settle after 15 passes and the 16th confirms it.
+	assert.equal(humidityConverged, true);
+	assert.equal(humidityPasses, 16);
 
 	assert.equal(humidity[0], 1);
 	assert.equal(moisture[0], 1);

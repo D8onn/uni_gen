@@ -77,7 +77,7 @@ function getHumiditySources(cells) {
 function calculateHumidity(cells) {
 	const sources = getHumiditySources(cells);
 	let humidity = cells.map((cell) => (cell.biome === "Water" ? 1 : 0));
-	for (let pass = 0; pass < cells.length; pass++) {
+	for (let pass = 1; pass <= cells.length; pass++) {
 		let largestChange = 0;
 		humidity = cells.map((cell) => {
 			if (cell.biome === "Water") return 1;
@@ -88,14 +88,14 @@ function calculateHumidity(cells) {
 			largestChange = Math.max(largestChange, Math.abs(value - humidity[cell.id]));
 			return value;
 		});
-		if (largestChange < CONVERGENCE_TOLERANCE) break;
+		if (largestChange < CONVERGENCE_TOLERANCE) return { humidity, passes: pass, converged: true };
 	}
-	return humidity;
+	return { humidity, passes: cells.length, converged: false };
 }
 
 // Cells need id, center, latitude, elevation, neighbors, distanceToWater, and biome ("Water" or not).
 export function calculateClimate(cells, { maxElevation, moistureNoise = () => 0 }) {
-	const humidity = calculateHumidity(cells);
+	const { humidity, passes: humidityPasses, converged: humidityConverged } = calculateHumidity(cells);
 	const temperature = cells.map((cell) =>
 		calculateTemperature(cell.latitude, heightAboveSea(cell), maxElevation)
 	);
@@ -108,5 +108,5 @@ export function calculateClimate(cells, { maxElevation, moistureNoise = () => 0 
 			1
 		);
 	});
-	return { temperature, moisture, humidity };
+	return { temperature, moisture, humidity, humidityPasses, humidityConverged };
 }

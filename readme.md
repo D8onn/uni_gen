@@ -12,6 +12,8 @@ To run the generator, use the command `npx vite` to run locally.
 
 Run `npm test` for the spherical grid and determinism checks and `npx vite build` for a production build.
 
+`npm run world-summary` prints a compact quality summary of generated worlds for the fixed seeds 1, 42, 12345, and 99999 at 80 cells pole-to-pole, without a browser: each biome's share and mean elevation, temperature, and moisture; land-cell ranges of elevation, slope, temperature, moisture, and distance to water; biome boundary and implausible-transition counts; river, basin, and tree counts; and whether the moisture solve converged. Pass seeds and options after `--`, for example `npm run world-summary -- 7 2024 --cells 40 --json`. The summary comes from `summarizeWorld` in `src/utility/planet/worldDiagnostics.js`, which returns plain data and is also checked by `test/world-diagnostics.test.mjs`.
+
 ## Reproducing a World
 
 Each launch generates a random 32-bit seed and logs it to the browser console. Add `?seed=12345` to the URL to reproduce a world with a specific seed.

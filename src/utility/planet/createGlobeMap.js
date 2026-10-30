@@ -280,6 +280,8 @@ export function createGlobeMap({
 		seed: normalizedSeed,
 		radius,
 		riverThreshold: hydrology.riverThreshold,
+		humidityPasses: climate.humidityPasses,
+		humidityConverged: climate.humidityConverged,
 		poleToPoleTarget: poleToPoleCells,
 		estimatedPoleToPoleCells: Math.PI / meanNeighborAngle,
 		detail,
