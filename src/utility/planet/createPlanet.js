@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { createControls, createRenderer } from "../sceneHelpers.js";
 import { createGlobeMap } from "./createGlobeMap.js";
+import { addLighting } from "./lighting.js";
 
 const biomeColors = new Map([
 	["Water", 0x347caa],
@@ -73,11 +74,7 @@ export async function createPlanet({
 	addGlobeSurface(scene, globe, radius);
 	addTrees(scene, globe, gltf.scene, radius);
 
-	const light = new THREE.DirectionalLight(0xffffff, 2.2);
-	light.position.set(radius * 3, radius * 4, radius * 2);
-	light.castShadow = false;
-	scene.add(light, light.target);
-	scene.add(new THREE.HemisphereLight(0xdbeaff, 0x443622, 1.1));
+	addLighting(scene, camera);
 
 	renderer.setAnimationLoop(() => {
 		controls.update();
