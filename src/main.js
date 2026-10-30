@@ -38,8 +38,24 @@ THREE.DefaultLoadingManager.onError = function (url) {
 	console.log("There was an error loading " + url);
 };
 
+async function createWorldFromUrl() {
+	const worldOptions = { poleToPoleCells: 80 };
+	const seed = new URLSearchParams(window.location.search).get("seed");
+	if (seed !== null) {
+		if (seed.trim() === "") {
+			throw new RangeError("seed must be a non-empty unsigned 32-bit integer.");
+		}
+		worldOptions.seed = Number(seed);
+	}
+	return createPlanet(worldOptions);
+}
+
 if (!WebGL.isWebGL2Available()) {
 	document.getElementById("container").appendChild(WebGL.getWebGL2ErrorMessage());
 } else {
-	createPlanet({ poleToPoleCells: 80 });
+	createWorldFromUrl().catch((error) => {
+		console.error("Unable to generate world:", error);
+		document.getElementById("loading").textContent =
+			`Unable to generate world: ${error.message}`;
+	});
 }

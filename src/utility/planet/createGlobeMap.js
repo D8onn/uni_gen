@@ -1,5 +1,6 @@
 import { IcosahedronGeometry, Vector3 } from "three";
 import { SimplexNoise } from "three/examples/jsm/math/SimplexNoise.js";
+import { createSeededRandom } from "./seededRandom.js";
 
 const MAX_ELEVATION = 0.45;
 const SEA_LEVEL = -MAX_ELEVATION * 0.175;
@@ -40,11 +41,16 @@ function classifyBiome(elevation, temperature, moisture) {
 	return "Grasslands";
 }
 
-export function createGlobeMap({ poleToPoleCells = 80 } = {}) {
+export function createGlobeMap({ poleToPoleCells = 80, seed = 1 } = {}) {
 	if (!Number.isInteger(poleToPoleCells) || poleToPoleCells < 1) {
 		throw new RangeError("poleToPoleCells must be a positive integer.");
 	}
+	if (!Number.isSafeInteger(seed) || seed < 0 || seed > 0xffffffff) {
+		throw new RangeError("seed must be an unsigned 32-bit integer.");
+	}
 
+	const normalizedSeed = seed >>> 0;
+	const random = createSeededRandom(normalizedSeed);
 	const detail = getDetailForPoleToPoleCells(poleToPoleCells);
 	const icosphere = new IcosahedronGeometry(1, detail);
 	const positions = icosphere.getAttribute("position");
@@ -104,7 +110,7 @@ export function createGlobeMap({ poleToPoleCells = 80 } = {}) {
 	}
 	icosphere.dispose();
 
-	const simplex = new SimplexNoise();
+	const simplex = new SimplexNoise({ random });
 	const cells = centers.map((center, id) => {
 		const latitude = Math.asin(clamp(center.y, -1, 1));
 		const elevation =
@@ -169,6 +175,8 @@ export function createGlobeMap({ poleToPoleCells = 80 } = {}) {
 				: cell.biome === "Beaches"
 					? 0.025
 					: Math.max(cell.elevation, 0.025);
+		const treeRoll = random();
+		cell.hasTree = cell.biome === "Forest" && treeRoll < 0.025;
 	}
 
 	const edges = [...edgeFaces.values()].map(({ cellA, cellB, faceIds }) => ({
@@ -184,6 +192,7 @@ export function createGlobeMap({ poleToPoleCells = 80 } = {}) {
 		}, 0) / edges.length;
 
 	return {
+		seed: normalizedSeed,
 		poleToPoleTarget: poleToPoleCells,
 		estimatedPoleToPoleCells: Math.PI / meanNeighborAngle,
 		detail,

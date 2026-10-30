@@ -10,7 +10,11 @@ To run the generator, use the command `npx vite` to run locally.
 
 ## Checks
 
-Run `npm test` for the spherical grid topology checks and `npx vite build` for a production build.
+Run `npm test` for the spherical grid and determinism checks and `npx vite build` for a production build.
+
+## Reproducing a World
+
+Each launch generates a random 32-bit seed and logs it to the browser console. Add `?seed=12345` to the URL to reproduce a world with a specific seed.
 
 ## Assets
 

@@ -16,8 +16,20 @@ const biomeColors = new Map([
 
 const up = new THREE.Vector3(0, 1, 0);
 
-export async function createPlanet({ poleToPoleCells = 80, radius = 10 } = {}) {
-	const globe = createGlobeMap({ poleToPoleCells });
+function createRandomSeed() {
+	const values = new Uint32Array(1);
+	if (globalThis.crypto?.getRandomValues) {
+		return globalThis.crypto.getRandomValues(values)[0];
+	}
+	return Math.floor(Math.random() * 0x100000000);
+}
+
+export async function createPlanet({
+	poleToPoleCells = 80,
+	radius = 10,
+	seed = createRandomSeed(),
+} = {}) {
+	const globe = createGlobeMap({ poleToPoleCells, seed });
 	const scene = new THREE.Scene();
 	const camera = new THREE.PerspectiveCamera(
 		50,
@@ -72,8 +84,13 @@ export async function createPlanet({ poleToPoleCells = 80, radius = 10 } = {}) {
 	});
 
 	console.info(
-		`Generated ${globe.cells.length} spherical cells (${globe.estimatedPoleToPoleCells.toFixed(1)} cells pole-to-pole; 12 pentagons).`
+		`World seed: ${globe.seed}. Generated ${globe.cells.length} spherical cells (${globe.estimatedPoleToPoleCells.toFixed(1)} cells pole-to-pole; 12 pentagons).`
 	);
+	return {
+		seed: globe.seed,
+		cellCount: globe.cells.length,
+		estimatedPoleToPoleCells: globe.estimatedPoleToPoleCells,
+	};
 }
 
 function addGlobeSurface(scene, globe, radius) {
@@ -145,7 +162,7 @@ function addGlobeSurface(scene, globe, radius) {
 
 function addTrees(scene, globe, treeModel, radius) {
 	for (const cell of globe.cells) {
-		if (cell.biome !== "Forest" || Math.random() >= 0.025) continue;
+		if (!cell.hasTree) continue;
 		const tree = treeModel.clone(true);
 		const normal = cell.center.clone();
 		tree.position.copy(normal).multiplyScalar(radius + cell.surfaceElevation + 0.025);
