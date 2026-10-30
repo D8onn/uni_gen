@@ -18,6 +18,24 @@ Run `npm test` for the spherical grid and determinism checks and `npx vite build
 
 Each launch generates a random 32-bit seed and logs it to the browser console. Add `?seed=12345` to the URL to reproduce a world with a specific seed.
 
+## Running the Simulation
+
+The app runs the ecology simulation (habitat, population, traits, dispersal) in a Web Worker, so stepping never blocks rendering or orbit controls. The worker builds its own copy of the world from the same seed and starts paused at tick 0. Nothing is drawn on the globe yet; the panel at the top right shows tick, organism count, total biomass, occupied cells, and births and deaths (last tick and total).
+
+Settings come from the URL; a missing one takes its default, and an invalid one shows an error instead of loading the world:
+
+| Parameter | Meaning | Default | Range |
+| --- | --- | --- | --- |
+| `seed` | World seed, also the population's seed | random | 0 to 4294967295 |
+| `founders` | Organisms placed on random land cells at tick 0 | 1000 | 0 to 100000 |
+| `species` | `evolving` (`EVOLVING_PRODUCER`) or `neutral` (`DEFAULT_PRODUCER`, traits never change) | `evolving` | |
+| `dispersal` | `dispersalChance`, the chance an offspring moves to a neighboring land cell | 0.1 | 0 to 1 |
+| `speed` | Ticks per second while playing | 10 | 1 to 200 |
+
+For example, `?seed=12345&founders=500&species=neutral&dispersal=0&speed=50`. The same URL reproduces the same simulation tick for tick, however fast or in whatever steps it is run.
+
+The panel mirrors these settings. **Play/Pause** and **Step** (one tick) control time. **Apply** restarts the simulation at tick 0 with the entered settings and writes them to the URL; changing the seed reloads the page because the globe is built for one seed. **Reset** restarts with the last applied settings and discards unapplied edits. Changing **Ticks/sec** takes effect immediately without a restart. Speed is a target: a tick takes about 8 ms at a few thousand organisms, so very high speeds fall behind, and the panel shows the achieved rate.
+
 ## Climate Model
 
 Each cell stores `temperature` and `moisture` (`src/utility/planet/climate.js`), derived from geography after elevation and distance to water and used to classify land biomes. Both are unitless indices from 0 (coldest, driest) to 1 (hottest, wettest), not physical units, and are reproducible from the seed.
