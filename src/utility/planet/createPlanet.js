@@ -1,319 +1,155 @@
 import * as THREE from "three";
-import { createMap } from "./createMap";
-import { createAxis, createControls, createRenderer } from "../sceneHelpers.js";
-import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
-import {
-	GLTFLoader,
-	MTLLoader,
-	OBJLoader,
-	RGBELoader,
-} from "three/examples/jsm/Addons.js";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { createControls, createRenderer } from "../sceneHelpers.js";
+import { createGlobeMap } from "./createGlobeMap.js";
 
-let biomes = {
-	0: "Water",
-	1: "Mountains",
-	2: "Grasslands",
-	3: "Forest",
-	4: "Beaches",
-	5: "Desert",
-	6: "Taiga",
-	7: "Chaparral",
-};
+const biomeColors = new Map([
+	["Water", 0x347caa],
+	["Mountains", 0x9ca5aa],
+	["Grasslands", 0x78ad4d],
+	["Forest", 0x28663d],
+	["Beaches", 0xdac78f],
+	["Desert", 0xc88a4c],
+	["Taiga", 0x71908b],
+	["Chaparral", 0xa4a05a],
+]);
 
-let colors = new Map();
-let landHeight = 5;
-let tree = null;
+const up = new THREE.Vector3(0, 1, 0);
 
-let scene, camera, renderer, envmap;
-
-export async function createPlanet(
-	width,
-	height,
-	landHeight = 5,
-	radius = 1,
-	noiseScale = 45,
-	waterThreshold = 0.1,
-	mountainsThreshold = 0.9
-) {
-	height = height;
-	width = width;
-
-	scene = new THREE.Scene();
-
-	camera = new THREE.PerspectiveCamera(
-		75,
+export async function createPlanet({ poleToPoleCells = 80, radius = 10 } = {}) {
+	const globe = createGlobeMap({ poleToPoleCells });
+	const scene = new THREE.Scene();
+	const camera = new THREE.PerspectiveCamera(
+		50,
 		window.innerWidth / window.innerHeight,
-		0.1,
-		2000
+		radius * 0.01,
+		radius * 20
 	);
-	renderer = createRenderer();
+	const renderer = createRenderer();
 
-	scene.background = new THREE.Color(0xf6f0f0);
-
-	window.addEventListener("resize", onWindowResize);
-
-	// initial camera position
-	camera.position.set(0, 30, 30);
-	const controls = createControls(camera, renderer);
-
-	// creates an environment map that makes the hexagons look nicer
-	var pmrem = new THREE.PMREMGenerator(renderer);
-	var envmapTexture = await new RGBELoader()
-		.setDataType(THREE.FloatType)
-		.loadAsync("/models/lakeside_sunrise_4k.hdr");
-	envmap = pmrem.fromEquirectangular(envmapTexture).texture;
-
-	// creates the tree object for the forests
-	// asset from: https://michaelsgamelab.itch.io/rpg-cabin-models
-	var loader = new GLTFLoader();
-	var gltf = await loader.loadAsync("/models/tree.glb", (prg) => {});
-	tree = gltf.scene;
-	tree.scale.set(0.3, 0.5, 0.3);
-
-	///////////////////////////////////////////////////
-	// This is where creating the planet map is done //
-	setUpBiomesColor();
-
-	var planetMap = createMap(
-		width,
-		height,
-		landHeight,
-		noiseScale,
-		waterThreshold,
-		mountainsThreshold
-	);
-	console.log(planetMap);
-
-	// create lighting
-	const color = 0xffffff;
-	const intensity = 0.75;
-	const light = new THREE.DirectionalLight(color, intensity);
-	light.position.set(0, 20, -5);
-	light.target.position.set(10, 0, 0);
-	light.castShadow = true;
-	light.shadow.mapSize.width = 1024;
-	light.shadow.mapSize.height = 1024;
-	light.shadow.camera.near = 0.1;
-	light.shadow.camera.far = 200;
-
-	scene.add(light);
-	scene.add(light.target);
-
-	const skyColor = 0xffffff; // light blue
-	const groundColor = 0xb97a20; // brownish orange
-	const hemiLight = new THREE.HemisphereLight(skyColor, groundColor, intensity);
-	scene.add(hemiLight);
-
-	buildMap(scene, planetMap, radius, width, height);
-
-	///////////////////////////////////////////////////
-
-	renderer.setAnimationLoop(animate);
-
-	function animate() {
-		controls.update();
-		renderer.render(scene, camera);
-	}
-}
-
-function buildMap(scene, planetMap, radius, width, height) {
-	var waterGeo = new THREE.BoxGeometry(0, 0, 0);
-	var grasslandGeo = new THREE.BoxGeometry(0, 0, 0);
-	var forestGeo = new THREE.BoxGeometry(0, 0, 0);
-	var desertGeo = new THREE.BoxGeometry(0, 0, 0);
-	var beachGeo = new THREE.BoxGeometry(0, 0, 0);
-	var mountainGeo = new THREE.BoxGeometry(0, 0, 0);
-	var taigaGeo = new THREE.BoxGeometry(0, 0, 0);
-	var chaparralGeo = new THREE.BoxGeometry(0, 0, 0);
-
-	planetMap.forEach((val, key) => {
-		const geometry = new THREE.CylinderGeometry(radius, radius, val.height, 6);
-		geometry.translate(...findPosition(val, radius, width, height));
-
-		if (val.biome == biomes[0]) {
-			waterGeo = mergeGeometries([waterGeo, geometry]);
-		} else if (val.biome == biomes[1]) {
-			mountainGeo = mergeGeometries([mountainGeo, geometry]);
-		} else if (val.biome == biomes[2]) {
-			grasslandGeo = mergeGeometries([grasslandGeo, geometry]);
-		} else if (val.biome == biomes[3]) {
-			const num = THREE.MathUtils.randFloat(0, 1);
-			if (num < 0.15) {
-				var newTree = tree.clone();
-				var position = [...findPosition(val, radius, width, height)];
-				position[1] *= 2;
-				newTree.position.set(...position);
-				scene.add(newTree);
-			}
-
-			forestGeo = mergeGeometries([forestGeo, geometry]);
-		} else if (val.biome == biomes[4]) {
-			beachGeo = mergeGeometries([beachGeo, geometry]);
-		} else if (val.biome == biomes[5]) {
-			desertGeo = mergeGeometries([desertGeo, geometry]);
-		} else if (val.biome == biomes[6]) {
-			taigaGeo = mergeGeometries([taigaGeo, geometry]);
-		} else if (val.biome == biomes[7]) {
-			chaparralGeo = mergeGeometries([chaparralGeo, geometry]);
-		} else {
-		}
+	scene.background = new THREE.Color(0x07111a);
+	window.addEventListener("resize", () => {
+		camera.aspect = window.innerWidth / window.innerHeight;
+		camera.updateProjectionMatrix();
+		renderer.setSize(window.innerWidth, window.innerHeight);
 	});
 
-	var waterMesh = createMesh(waterGeo, colors.get(biomes[0]));
-	var mountainMesh = createMesh(mountainGeo, colors.get(biomes[1]));
-	var grasslandMesh = createMesh(grasslandGeo, colors.get(biomes[2]));
-	var forestMesh = createMesh(forestGeo, colors.get(biomes[3]));
-	var beachMesh = createMesh(beachGeo, colors.get(biomes[4]));
-	var desertMesh = createMesh(desertGeo, colors.get(biomes[5]));
-	var taigaMesh = createMesh(taigaGeo, colors.get(biomes[6]));
-	var chaparralMesh = createMesh(chaparralGeo, colors.get(biomes[7]));
-	scene.add(
-		waterMesh,
-		mountainMesh,
-		grasslandMesh,
-		forestMesh,
-		beachMesh,
-		desertMesh,
-		taigaMesh,
-		chaparralMesh
+	const controls = createControls(camera, renderer);
+	controls.enablePan = false;
+	controls.minDistance = radius * 1.15;
+	controls.maxDistance = radius * 8;
+	camera.position.set(0, radius * 1.6, radius * 3.2);
+
+	const gltf = await new GLTFLoader().loadAsync("/models/tree.glb");
+	gltf.scene.traverse((object) => {
+		if (!object.isMesh) return;
+		const toLambert = (material) =>
+			new THREE.MeshLambertMaterial({
+				color: material.color,
+				map: material.map,
+				alphaMap: material.alphaMap,
+				transparent: material.transparent,
+				alphaTest: material.alphaTest,
+				side: material.side,
+			});
+		object.material = Array.isArray(object.material)
+			? object.material.map(toLambert)
+			: toLambert(object.material);
+	});
+	gltf.scene.scale.set(0.1, 0.16, 0.1);
+	addGlobeSurface(scene, globe, radius);
+	addTrees(scene, globe, gltf.scene, radius);
+
+	const light = new THREE.DirectionalLight(0xffffff, 2.2);
+	light.position.set(radius * 3, radius * 4, radius * 2);
+	light.castShadow = false;
+	scene.add(light, light.target);
+	scene.add(new THREE.HemisphereLight(0xdbeaff, 0x443622, 1.1));
+
+	renderer.setAnimationLoop(() => {
+		controls.update();
+		renderer.render(scene, camera);
+	});
+
+	console.info(
+		`Generated ${globe.cells.length} spherical cells (${globe.estimatedPoleToPoleCells.toFixed(1)} cells pole-to-pole; 12 pentagons).`
 	);
 }
 
-function createMesh(geo, mat) {
-	const mesh = new THREE.Mesh(geo, mat);
-	mesh.castShadow = true;
-	mesh.receiveShadow = true;
-	return mesh;
+function addGlobeSurface(scene, globe, radius) {
+	const facePositions = globe.faces.map((face) => {
+		const averageElevation =
+			face.cellIds.reduce((sum, id) => sum + globe.cells[id].surfaceElevation, 0) /
+			face.cellIds.length;
+		return face.center.clone().multiplyScalar(radius + averageElevation);
+	});
+	const positionsByBiome = new Map(
+		[...biomeColors.keys()].map((biome) => [biome, []])
+	);
+
+	for (const cell of globe.cells) {
+		const positions = positionsByBiome.get(cell.biome);
+		const center = cell.center.clone().multiplyScalar(radius + cell.surfaceElevation);
+		for (let index = 0; index < cell.boundaryFaceIds.length; index++) {
+			let pointA = facePositions[cell.boundaryFaceIds[index]];
+			let pointB =
+				facePositions[cell.boundaryFaceIds[(index + 1) % cell.boundaryFaceIds.length]];
+			const normal = new THREE.Vector3().crossVectors(
+				new THREE.Vector3().subVectors(pointA, center),
+				new THREE.Vector3().subVectors(pointB, center)
+			);
+			if (normal.dot(center) < 0) [pointA, pointB] = [pointB, pointA];
+			positions.push(
+				center.x,
+				center.y,
+				center.z,
+				pointA.x,
+				pointA.y,
+				pointA.z,
+				pointB.x,
+				pointB.y,
+				pointB.z
+			);
+		}
+	}
+
+	for (const [biome, positions] of positionsByBiome) {
+		if (positions.length === 0) continue;
+		const geometry = new THREE.BufferGeometry();
+		geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+		geometry.computeVertexNormals();
+		const color = biomeColors.get(biome);
+		const material = new THREE.MeshLambertMaterial({ color });
+		const mesh = new THREE.Mesh(geometry, material);
+		mesh.castShadow = false;
+		mesh.receiveShadow = false;
+		scene.add(mesh);
+	}
+
+	const edgePositions = [];
+	for (const edge of globe.edges) {
+		for (const faceId of [edge.faceA, edge.faceB]) {
+			const point = facePositions[faceId].clone().multiplyScalar(1.0005);
+			edgePositions.push(point.x, point.y, point.z);
+		}
+	}
+	const edgeGeometry = new THREE.BufferGeometry();
+	edgeGeometry.setAttribute("position", new THREE.Float32BufferAttribute(edgePositions, 3));
+	const edges = new THREE.LineSegments(
+		edgeGeometry,
+		new THREE.LineBasicMaterial({ color: 0x142019, transparent: true, opacity: 0.55 })
+	);
+	edges.renderOrder = 1;
+	scene.add(edges);
 }
 
-function setUpBiomesColor() {
-	colors.set(
-		"Forest",
-		new THREE.MeshStandardMaterial({
-			color: 0x0b620d,
-			envMap: envmap,
-			flatShading: true,
-			roughness: 0.25,
-			metalness: 0.25,
-		})
-	);
-	colors.set(
-		"Temperate",
-		new THREE.MeshStandardMaterial({
-			color: 0x54ab7f,
-			envMap: envmap,
-			flatShading: true,
-			roughness: 0.25,
-			metalness: 0.25,
-		})
-	);
-	colors.set(
-		"Taiga",
-		new THREE.MeshStandardMaterial({
-			color: 0x0eeff1,
-			envMap: envmap,
-			flatShading: true,
-			roughness: 0.25,
-			metalness: 0.25,
-		})
-	);
-	colors.set(
-		"Chaparral",
-		new THREE.MeshStandardMaterial({
-			color: 0xd5d12a,
-			envMap: envmap,
-			flatShading: true,
-			roughness: 0.25,
-			metalness: 0.25,
-		})
-	);
-	colors.set(
-		"Beaches",
-		new THREE.MeshStandardMaterial({
-			color: 0xc2b280,
-			envMap: envmap,
-			flatShading: true,
-			roughness: 0.25,
-			metalness: 0.25,
-		})
-	);
-	colors.set(
-		"Grasslands",
-		new THREE.MeshStandardMaterial({
-			color: 0x6cc936,
-			envMap: envmap,
-			flatShading: true,
-			roughness: 0.25,
-			metalness: 0.25,
-		})
-	);
-	colors.set(
-		"Desert",
-		new THREE.MeshStandardMaterial({
-			color: 0x9c4914,
-			envMap: envmap,
-			flatShading: true,
-			roughness: 0.25,
-			metalness: 0.25,
-		})
-	);
-	colors.set(
-		"Mountains",
-		new THREE.MeshStandardMaterial({
-			color: 0xfffafa,
-			envMap: envmap,
-			flatShading: true,
-			roughness: 0.25,
-			metalness: 0.25,
-		})
-	);
-	colors.set(
-		"Ice Caps",
-		new THREE.MeshStandardMaterial({
-			color: 0xbddcff,
-			envMap: envmap,
-			flatShading: true,
-			roughness: 0.25,
-			metalness: 0.25,
-		})
-	);
-
-	colors.set(
-		"Water",
-		new THREE.MeshStandardMaterial({
-			color: 0x4e51f8,
-			envMap: envmap,
-			flatShading: true,
-			roughness: 0.25,
-			metalness: 0.25,
-		})
-	);
-}
-
-function findPosition(val, radius, width, height) {
-	var diameter = radius * 2.0;
-	var x =
-		val.y % 2 == 0
-			? val.x * diameter * Math.cos(THREE.MathUtils.degToRad(30)) -
-			  width * Math.cos(THREE.MathUtils.degToRad(30)) * radius
-			: val.x * diameter * Math.cos(THREE.MathUtils.degToRad(30)) +
-			  radius * Math.cos(THREE.MathUtils.degToRad(30)) -
-			  width * Math.cos(THREE.MathUtils.degToRad(30)) * radius;
-	var z = val.height / 2;
-	var y =
-		val.y % 2 == 0
-			? val.y * radius + val.y * radius * Math.sin(THREE.MathUtils.degToRad(30))
-			: val.y * radius + val.y * radius * Math.sin(THREE.MathUtils.degToRad(30));
-	y = height % 2 == 0 ? y + radius : y;
-	return [
-		x, // * Math such that the map is in center of page
-		z,
-		y - (Math.floor(height / 2.0) / 2.0) * (diameter + radius),
-	];
-}
-
-function onWindowResize() {
-	camera.aspect = window.innerWidth / window.innerHeight;
-	camera.updateProjectionMatrix();
-	renderer.setSize(window.innerWidth, window.innerHeight);
+function addTrees(scene, globe, treeModel, radius) {
+	for (const cell of globe.cells) {
+		if (cell.biome !== "Forest" || Math.random() >= 0.025) continue;
+		const tree = treeModel.clone(true);
+		const normal = cell.center.clone();
+		tree.position.copy(normal).multiplyScalar(radius + cell.surfaceElevation + 0.025);
+		tree.quaternion.setFromUnitVectors(up, normal);
+		scene.add(tree);
+	}
 }

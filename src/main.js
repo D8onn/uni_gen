@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import WebGL from "three/addons/capabilities/WebGL.js";
-import { createUni, createPlanet } from "./utility/";
+import { createPlanet } from "./utility/";
 
 THREE.DefaultLoadingManager.onStart = function (url, itemsLoaded, itemsTotal) {
 	console.log(
@@ -41,21 +41,5 @@ THREE.DefaultLoadingManager.onError = function (url) {
 if (!WebGL.isWebGL2Available()) {
 	document.getElementById("container").appendChild(WebGL.getWebGL2ErrorMessage());
 } else {
-	// use the utility functions to create the planet
-	const width = 60;
-	const height = 60;
-	const radius = 0.5;
-	const landHeight = 5;
-	const noiseScale = 60;
-	const waterThreshold = 0.1;
-	const mountainsThreshold = 0.95;
-	createPlanet(
-		width,
-		height,
-		landHeight,
-		radius,
-		noiseScale,
-		waterThreshold,
-		mountainsThreshold
-	);
+	createPlanet({ poleToPoleCells: 80 });
 }
