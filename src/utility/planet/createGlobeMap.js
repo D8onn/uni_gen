@@ -1,21 +1,8 @@
 import { IcosahedronGeometry, Vector3 } from "three";
 import { SimplexNoise } from "three/examples/jsm/math/SimplexNoise.js";
-import { calculateHydrology } from "./hydrology.js";
-import { createMinHeap } from "./minHeap.js";
 import { createSeededRandom } from "./seededRandom.js";
 
-const DEFAULT_RADIUS = 10;
 const MAX_ELEVATION = 0.45;
-const ELEVATION_OCTAVES = [
-	{ frequency: 1.7, amplitude: 0.55 },
-	{ frequency: 4.3, amplitude: 0.3 },
-	{ frequency: 10.7, amplitude: 0.15 },
-];
-// Independent octaves sum to a standard deviation of sqrt(sum of amplitude^2) times that of
-// one octave. Dividing by it keeps the elevation spread of a single noise sample, so the sea
-// and mountain thresholds keep their meaning.
-const ELEVATION_SCALE =
-	1 / Math.sqrt(ELEVATION_OCTAVES.reduce((sum, { amplitude }) => sum + amplitude ** 2, 0));
 const SEA_LEVEL = -MAX_ELEVATION * 0.175;
 const MOUNTAIN_LEVEL = MAX_ELEVATION * 0.72;
 const BEACH_LEVEL = MAX_ELEVATION * 0.15;
@@ -44,83 +31,6 @@ function clamp(value, min, max) {
 	return Math.max(min, Math.min(max, value));
 }
 
-function sampleElevation(simplex, center) {
-	let weightedNoise = 0;
-	for (const { frequency, amplitude } of ELEVATION_OCTAVES) {
-		weightedNoise +=
-			simplex.noise3d(center.x * frequency, center.y * frequency, center.z * frequency) *
-			amplitude;
-	}
-	return clamp(weightedNoise * ELEVATION_SCALE * MAX_ELEVATION, -MAX_ELEVATION, MAX_ELEVATION);
-}
-
-// Slope is the angle of the least-squares elevation plane over a cell's neighbors. Elevation
-// is in the same units as the planet radius (the renderer places terrain at radius + elevation),
-// so lateral distances are scaled by the radius.
-function calculateSlope(cell, cells, radius) {
-	const referenceAxis =
-		Math.abs(cell.center.y) < 0.9 ? new Vector3(0, 1, 0) : new Vector3(1, 0, 0);
-	const tangentX = new Vector3().crossVectors(referenceAxis, cell.center).normalize();
-	const tangentY = new Vector3().crossVectors(cell.center, tangentX).normalize();
-	let xx = 0;
-	let xy = 0;
-	let yy = 0;
-	let xz = 0;
-	let yz = 0;
-
-	for (const neighborId of cell.neighbors) {
-		const neighbor = cells[neighborId];
-		const dot = clamp(cell.center.dot(neighbor.center), -1, 1);
-		const distance = Math.acos(dot);
-		const direction = neighbor.center
-			.clone()
-			.addScaledVector(cell.center, -dot)
-			.normalize();
-		const dx = radius * distance * direction.dot(tangentX);
-		const dy = radius * distance * direction.dot(tangentY);
-		const dz = neighbor.elevation - cell.elevation;
-		xx += dx * dx;
-		xy += dx * dy;
-		yy += dy * dy;
-		xz += dx * dz;
-		yz += dy * dz;
-	}
-
-	const determinant = xx * yy - xy * xy;
-	if (determinant <= Number.EPSILON) return 0;
-	const gradientX = (xz * yy - yz * xy) / determinant;
-	const gradientY = (yz * xx - xz * xy) / determinant;
-	return Math.atan(Math.hypot(gradientX, gradientY));
-}
-
-// Shortest path along cell-center arcs to the nearest water cell, in radians on the unit
-// sphere (multiply by the radius for surface distance).
-function calculateDistanceToWater(cells) {
-	const distances = new Float64Array(cells.length).fill(Infinity);
-	const heap = createMinHeap();
-	for (const cell of cells) {
-		if (cell.biome !== "Water") continue;
-		distances[cell.id] = 0;
-		heap.push(cell.id, 0);
-	}
-	if (heap.size === 0) return new Array(cells.length).fill(Math.PI);
-
-	while (heap.size > 0) {
-		const { id: cellId, priority: distance } = heap.pop();
-		if (distance !== distances[cellId]) continue;
-		const cell = cells[cellId];
-		for (const neighborId of cell.neighbors) {
-			const neighbor = cells[neighborId];
-			const edgeDistance = Math.acos(clamp(cell.center.dot(neighbor.center), -1, 1));
-			const candidateDistance = distance + edgeDistance;
-			if (candidateDistance >= distances[neighborId]) continue;
-			distances[neighborId] = candidateDistance;
-			heap.push(neighborId, candidateDistance);
-		}
-	}
-	return Array.from(distances);
-}
-
 function classifyBiome(elevation, temperature, moisture) {
 	if (elevation < SEA_LEVEL) return "Water";
 	if (elevation > MOUNTAIN_LEVEL) return "Mountains";
@@ -131,16 +41,9 @@ function classifyBiome(elevation, temperature, moisture) {
 	return "Grasslands";
 }
 
-export function createGlobeMap({
-	poleToPoleCells = 80,
-	seed = 1,
-	radius = DEFAULT_RADIUS,
-} = {}) {
+export function createGlobeMap({ poleToPoleCells = 80, seed = 1 } = {}) {
 	if (!Number.isInteger(poleToPoleCells) || poleToPoleCells < 1) {
 		throw new RangeError("poleToPoleCells must be a positive integer.");
-	}
-	if (!Number.isFinite(radius) || radius <= 0) {
-		throw new RangeError("radius must be a positive number.");
 	}
 	if (!Number.isSafeInteger(seed) || seed < 0 || seed > 0xffffffff) {
 		throw new RangeError("seed must be an unsigned 32-bit integer.");
@@ -210,7 +113,8 @@ export function createGlobeMap({
 	const simplex = new SimplexNoise({ random });
 	const cells = centers.map((center, id) => {
 		const latitude = Math.asin(clamp(center.y, -1, 1));
-		const elevation = sampleElevation(simplex, center);
+		const elevation =
+			simplex.noise3d(center.x * 3.6, center.y * 3.6, center.z * 3.6) * MAX_ELEVATION;
 		const moisture =
 			(simplex.noise3d(
 				center.x * 6.4 + 11.3,
@@ -241,8 +145,6 @@ export function createGlobeMap({
 		};
 	});
 
-	for (const cell of cells) cell.slope = calculateSlope(cell, cells, radius);
-
 	for (const cell of cells) {
 		const referenceAxis =
 			Math.abs(cell.center.y) < 0.9 ? new Vector3(0, 1, 0) : new Vector3(1, 0, 0);
@@ -256,14 +158,6 @@ export function createGlobeMap({
 				Math.atan2(pointB.dot(tangentY), pointB.dot(tangentX))
 			);
 		});
-	}
-
-	const hydrology = calculateHydrology(cells);
-	for (const cell of cells) {
-		cell.flowTo = hydrology.flowTo[cell.id];
-		cell.flowAccumulation = hydrology.flowAccumulation[cell.id];
-		cell.drainageBasin = hydrology.drainageBasin[cell.id];
-		cell.hasRiver = hydrology.hasRiver[cell.id];
 	}
 
 	for (const cell of cells) {
@@ -282,11 +176,8 @@ export function createGlobeMap({
 					? 0.025
 					: Math.max(cell.elevation, 0.025);
 		const treeRoll = random();
-		cell.hasTree = cell.biome === "Forest" && !cell.hasRiver && treeRoll < 0.025;
+		cell.hasTree = cell.biome === "Forest" && treeRoll < 0.025;
 	}
-
-	const distancesToWater = calculateDistanceToWater(cells);
-	for (const cell of cells) cell.distanceToWater = distancesToWater[cell.id];
 
 	const edges = [...edgeFaces.values()].map(({ cellA, cellB, faceIds }) => ({
 		cellA,
@@ -302,8 +193,6 @@ export function createGlobeMap({
 
 	return {
 		seed: normalizedSeed,
-		radius,
-		riverThreshold: hydrology.riverThreshold,
 		poleToPoleTarget: poleToPoleCells,
 		estimatedPoleToPoleCells: Math.PI / meanNeighborAngle,
 		detail,
