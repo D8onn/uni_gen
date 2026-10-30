@@ -36,6 +36,21 @@ Each cell stores `temperature` and `moisture` (`src/utility/planet/climate.js`),
 - **Rates** (each 0–1, configurable per resource): water `regeneration` 0.1 and `spread` 0.3; nutrients `regeneration` 0.02 and `spread` 0.05.
 - **Queries and updates:** `getCellHabitat(habitat, cellId)` returns `{ conditions, capacity, resources }` for one cell; `consumeResource(habitat, cellId, resource, amount)` takes up to `amount` and returns what was actually taken. Invalid cell ids, resource names, amounts, rates, or tick counts throw a `RangeError`.
 
+## Organism Model
+
+`src/utility/ecology/population.js` simulates individual organisms of one abstract producer species (a "plant") on top of a habitat. Like the habitat, it is plain, serializable data with no Three.js, and nothing in rendering reads it. There are no heritable traits, mutation, or dispersal yet.
+
+- **State:** `createPopulation(world, { seed, initialCount, species? })` places `initialCount` organisms on seeded random land cells (any biome except `Water`), at most `maxPerCell` per cell. Each organism is `{ id, cellId, biomass, age, parentId }`. The population also stores `seed`, `tick`, `nextId`, the resolved `species` parameters, and birth and death counts. Organisms stay sorted by id.
+- **Units:** biomass is unitless (newborns have 0.2, the maximum is 1); demand and consumption use the habitat's resource units; age counts ticks.
+- **Time:** `stepPopulation(population, habitat, ticks = 1)` runs whole ticks. Each tick feeds, grows, kills, and reproduces organisms, then steps the habitat once, so a population tick is one habitat tick. Do not also call `stepHabitat` on a habitat that a population is using.
+- **Feeding:** each organism demands `uptake × biomass` of each resource. Per cell, the share of the total demand that the stocks can meet is set by the scarcest resource, and every organism there gets that same share (so food is split in proportion to biomass); only that share is taken from each resource.
+- **Growth:** `biomass × (1 + growthRate × light × share − maintenance)`, capped at `maxBiomass`. With the defaults, an organism grows only when it gets more than a quarter of its demand in full light; at the poles, where light is near 0, it shrinks.
+- **Death**, checked after growth, by first matching cause: `starvation` when biomass falls below `minBiomass`, `oldAge` when age reaches `maxAge`, otherwise `mortality` with probability `mortalityChance`.
+- **Reproduction:** a survivor at or above `reproductionBiomass` reproduces with probability `reproductionChance`, moving `offspringBiomass` from itself into one new organism in the same cell. Offspring are admitted in parent-id order while the cell has fewer than `maxPerCell` and the population fewer than `maxOrganisms` organisms; a parent whose offspring is not admitted keeps its biomass.
+- **Determinism:** each organism's random draws for a tick come from a generator seeded by (seed, tick, organism id), and all feeding happens before any growth, death, or birth is applied, so results do not depend on processing order or on unrelated organisms. A population and habitat restored from JSON continue identically.
+- **Default parameters** (`DEFAULT_PRODUCER`): uptake water 0.05 and nutrients 0.02 per unit of biomass per tick, `growthRate` 0.2, `maintenance` 0.05, `maxBiomass` 1, `reproductionBiomass` 0.6, `offspringBiomass` 0.2, `reproductionChance` 0.5, `minBiomass` 0.05, `maxAge` 400, `mortalityChance` 0.01, `maxPerCell` 50, `maxOrganisms` 100000. Any can be overridden through `species`. On a fully productive cell (temperature and moisture 1), nutrients run out and the population settles after about 100 ticks to between 3 and 14 organisms (usually 7–10), well below the per-cell cap.
+- **Inspection:** `getPopulationSummary(population)` returns `{ tick, count, totalBiomass, occupiedCells, lastTick, totals }`, where `lastTick` and `totals` hold `births` and `deaths` by cause; `getCellOrganisms(population, cellId)` returns copies of one cell's organisms. Invalid seeds, counts, species parameters, tick counts, or cell ids throw a `RangeError`.
+
 ## Assets
 
 Tree Assets from: https://michaelsgamelab.itch.io/rpg-cabin-models
