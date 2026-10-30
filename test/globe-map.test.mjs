@@ -73,8 +73,8 @@ test("80-cell globe is a closed hexagon-pentagon grid", () => {
 
 test("the same seed reproduces the same world data", () => {
 	const seed = 123456789;
-	const first = createGlobeMap({ poleToPoleCells: 12, seed });
-	const second = createGlobeMap({ poleToPoleCells: 12, seed });
+	const first = createGlobeMap({ poleToPoleCells: 40, seed });
+	const second = createGlobeMap({ poleToPoleCells: 40, seed });
 
 	assert.equal(first.seed, seed);
 	assert.ok(first.cells.some((cell) => cell.hasTree));
@@ -310,6 +310,36 @@ test("drainage basins partition the land and are named by their outlet", () => {
 	assert.ok(outlets.size > 1);
 	for (const cell of globe.cells) {
 		if (cell.biome !== "Water") assert.ok(outlets.has(cell.drainageBasin));
+	}
+});
+
+test("climate cools with latitude and height and dries away from water", () => {
+	const mean = (cells, field) => cells.reduce((sum, cell) => sum + cell[field], 0) / cells.length;
+	for (const seed of [1, 12345]) {
+		const globe = createGlobeMap({ poleToPoleCells: 80, seed });
+		const land = globe.cells.filter((cell) => cell.biome !== "Water");
+		const edge = Math.PI / globe.estimatedPoleToPoleCells;
+
+		for (const cell of globe.cells) {
+			assert.ok(cell.temperature >= 0 && cell.temperature <= 1);
+			assert.ok(cell.moisture >= 0 && cell.moisture <= 1);
+			if (cell.biome === "Water") assert.equal(cell.moisture, 1);
+		}
+
+		const band = (from, to) => land.filter((cell) => Math.abs(cell.latitude) >= from && Math.abs(cell.latitude) < to);
+		assert.ok(mean(band(0, 0.3), "temperature") > mean(band(0.6, 0.9), "temperature") + 0.2);
+		assert.ok(mean(band(0.6, 0.9), "temperature") > mean(band(1.2, 1.6), "temperature") + 0.2);
+		for (const cells of [band(0, 0.4), band(0.4, 0.8), band(0.8, 1.2)]) {
+			const lowland = cells.filter((cell) => cell.elevation < 0.05);
+			const highland = cells.filter((cell) => cell.elevation > 0.2);
+			assert.ok(mean(highland, "temperature") < mean(lowland, "temperature") - 0.1, `seed ${seed}`);
+		}
+
+		const coast = land.filter((cell) => cell.distanceToWater < 1.5 * edge);
+		const inland = land.filter((cell) => cell.distanceToWater > 3.5 * edge);
+		assert.ok(inland.length > 0.05 * land.length, `seed ${seed}`);
+		assert.ok(mean(inland, "moisture") < mean(coast, "moisture") - 0.1, `seed ${seed}`);
+		assert.ok(inland.filter((cell) => cell.moisture < 0.25).length > 0.2 * inland.length, `seed ${seed}`);
 	}
 });
 

@@ -1,5 +1,6 @@
 import { IcosahedronGeometry, Vector3 } from "three";
 import { SimplexNoise } from "three/examples/jsm/math/SimplexNoise.js";
+import { calculateClimate } from "./climate.js";
 import { calculateHydrology } from "./hydrology.js";
 import { createMinHeap } from "./minHeap.js";
 import { createSeededRandom } from "./seededRandom.js";
@@ -211,30 +212,14 @@ export function createGlobeMap({
 	const cells = centers.map((center, id) => {
 		const latitude = Math.asin(clamp(center.y, -1, 1));
 		const elevation = sampleElevation(simplex, center);
-		const moisture =
-			(simplex.noise3d(
-				center.x * 6.4 + 11.3,
-				center.y * 6.4 - 7.1,
-				center.z * 6.4 + 3.8
-			) +
-				1) /
-			2;
-		const temperature = clamp(
-			1 -
-				(Math.abs(latitude) / (Math.PI / 2)) * 0.85 -
-				(Math.max(elevation, 0) / MAX_ELEVATION) * 0.1,
-			0,
-			1
-		);
 
 		return {
 			id,
 			center,
 			latitude,
 			elevation,
-			temperature,
-			moisture,
-			biome: classifyBiome(elevation, temperature, moisture),
+			// Water depends only on elevation; land biomes are classified once the climate is known.
+			biome: elevation < SEA_LEVEL ? "Water" : null,
 			neighbors: [...neighbors[id]].sort((a, b) => a - b),
 			boundaryFaceIds: [],
 			surfaceElevation: 0,
@@ -242,6 +227,20 @@ export function createGlobeMap({
 	});
 
 	for (const cell of cells) cell.slope = calculateSlope(cell, cells, radius);
+
+	const distancesToWater = calculateDistanceToWater(cells);
+	for (const cell of cells) cell.distanceToWater = distancesToWater[cell.id];
+
+	const climate = calculateClimate(cells, {
+		maxElevation: MAX_ELEVATION,
+		moistureNoise: ({ center }) =>
+			simplex.noise3d(center.x * 6.4 + 11.3, center.y * 6.4 - 7.1, center.z * 6.4 + 3.8),
+	});
+	for (const cell of cells) {
+		cell.temperature = climate.temperature[cell.id];
+		cell.moisture = climate.moisture[cell.id];
+		cell.biome = classifyBiome(cell.elevation, cell.temperature, cell.moisture);
+	}
 
 	for (const cell of cells) {
 		const referenceAxis =
@@ -284,9 +283,6 @@ export function createGlobeMap({
 		const treeRoll = random();
 		cell.hasTree = cell.biome === "Forest" && !cell.hasRiver && treeRoll < 0.025;
 	}
-
-	const distancesToWater = calculateDistanceToWater(cells);
-	for (const cell of cells) cell.distanceToWater = distancesToWater[cell.id];
 
 	const edges = [...edgeFaces.values()].map(({ cellA, cellB, faceIds }) => ({
 		cellA,
