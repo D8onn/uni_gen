@@ -12,6 +12,8 @@ To run the generator, use the command `npx vite` to run locally.
 
 Run `npm test` for the spherical grid and determinism checks and `npx vite build` for a production build.
 
+`npm run world-summary` prints a compact quality summary of generated worlds for the fixed seeds 1, 42, 12345, and 99999 at 80 cells pole-to-pole, without a browser: each biome's share and mean elevation, temperature, and moisture; land-cell ranges of elevation, slope, temperature, moisture, and distance to water; biome boundary and implausible-transition counts; river, basin, and tree counts; and whether the moisture solve converged. Pass seeds and options after `--`, for example `npm run world-summary -- 7 2024 --cells 40 --json`. The summary comes from `summarizeWorld` in `src/utility/planet/worldDiagnostics.js`, which returns plain data and is also checked by `test/world-diagnostics.test.mjs`.
+
 ## Reproducing a World
 
 Each launch generates a random 32-bit seed and logs it to the browser console. Add `?seed=12345` to the URL to reproduce a world with a specific seed.
@@ -61,6 +63,25 @@ Each organism carries a `traits` object of continuous, heritable values from 0 t
 - **Defaults are neutral:** `selectionStrength` 0 and `mutationRate` 0 (`mutationSize` 0.05), so without overrides every match is 1, traits never change, and the population behaves exactly as described in the Organism Model. Evolution is opt-in: pass `species: EVOLVING_PRODUCER` (`selectionStrength` 2, `mutationRate` 0.1, `mutationSize` 0.05, founders 0.5/0.5) or set the parameters yourself.
 - **Behavior under `EVOLVING_PRODUCER`:** across 10 cells over 3000 ticks, with identical resources and temperature conditions of 0.8 versus 0.2, the mean `temperatureOptimum` moves from 0.5 to about 0.58–0.63 and 0.36–0.43. With `selectionStrength` 0, the temperature has no effect at all. Selection is strong. In the most mismatched habitat (temperature and moisture 1, match about 0.37), groups of linked cells survive, at about 2.5 organisms per cell, but an isolated cell started with only a few founders can die out (10 of 20 seeds with 2 founders over 500 ticks).
 - **Inspection:** `getPopulationSummary` also returns `traits`, the mean and standard deviation (`{ mean, sd }`) of each trait, or `null` when the population is empty. `summarizeTraits(organisms)` computes the same for any list, such as one cell's `getCellOrganisms`. Invalid trait names or values, a negative or non-finite `selectionStrength` or `mutationSize`, or a `mutationRate` outside 0–1 throw a `RangeError`.
+
+## Biome Classification
+
+Each cell's biome (`src/utility/planet/biomes.js`) comes from its own terrain and climate, checked in this order. Elevation levels are fractions of the maximum elevation (0.45 render units); temperature and moisture are the indices above.
+
+| Biome | Environmental range |
+| --- | --- |
+| Water | elevation below -0.175 |
+| Mountains | elevation above 0.72 |
+| Beaches | land touching water, elevation below 0.15, temperature at least 0.3 |
+| Taiga | temperature below 0.3 (any moisture) |
+| Forest | moisture at least 0.62 |
+| Desert | temperature at least 0.55, moisture below 0.27 |
+| Chaparral | temperature at least 0.55, moisture 0.27 to 0.45 |
+| Grasslands | everything else: temperature 0.3 to 0.55 with moisture below 0.62, or temperature at least 0.55 with moisture 0.45 to 0.62 |
+
+Transitions: Water, Mountains, and Beaches come from terrain and may border any biome. Two climate biomes may border each other only if their ranges touch: Taiga–Grasslands, Taiga–Forest, Grasslands–Forest, Grasslands–Desert, Grasslands–Chaparral, and Desert–Chaparral. Where a sharp climate change puts any other pair side by side (most often Chaparral next to Forest across a rain shadow or coast), both cells become Grasslands, which borders every biome, as an ecotone. This one refinement pass reads only the unrefined biomes, so it does not depend on cell order; it changes about 2% of cells at 80 cells pole-to-pole. River cells keep their biome and are drawn in their own color; every biome has a color in `planetMeshData.js`.
+
+Simplifications: Taiga stands in for all cold land (there is no tundra or ice), and Grasslands covers both cool steppe and warm savanna.
 
 ## Biome Classification
 
