@@ -2,10 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createGlobeMap } from "../src/utility/planet/createGlobeMap.js";
 
+function dot(a, b) {
+	return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+
 function snapshotWorld(globe) {
 	return globe.cells.map((cell) => ({
 		id: cell.id,
-		center: cell.center.toArray(),
+		center: cell.center,
 		latitude: cell.latitude,
 		elevation: cell.elevation,
 		slope: cell.slope,
@@ -52,7 +56,7 @@ test("80-cell globe is a closed hexagon-pentagon grid", () => {
 	for (const cell of globe.cells) {
 		assert.equal(cell.boundaryFaceIds.length, cell.neighbors.length);
 		assert.ok(globe.biomes.includes(cell.biome));
-		assert.ok(Math.abs(cell.center.length() - 1) < 1e-6);
+		assert.ok(Math.abs(Math.hypot(...cell.center) - 1) < 1e-6);
 		assert.ok(Number.isFinite(cell.latitude));
 		assert.ok(Number.isFinite(cell.elevation));
 		assert.ok(Number.isFinite(cell.slope));
@@ -75,6 +79,20 @@ test("the same seed reproduces the same world data", () => {
 	assert.equal(first.seed, seed);
 	assert.ok(first.cells.some((cell) => cell.hasTree));
 	assert.deepEqual(snapshotWorld(first), snapshotWorld(second));
+});
+
+test("the world is plain data that survives a JSON round trip", () => {
+	const globe = createGlobeMap({ poleToPoleCells: 12, seed: 42 });
+	const isPlain = (value) =>
+		value === null ||
+		typeof value !== "object" ||
+		((Array.isArray(value) || Object.getPrototypeOf(value) === Object.prototype) &&
+			Object.values(value).every(isPlain));
+
+	assert.ok(isPlain(globe));
+	assert.equal(globe.cells[0].center.length, 3);
+	assert.equal(globe.faces[0].center.length, 3);
+	assert.deepEqual(JSON.parse(JSON.stringify(globe)), globe);
 });
 
 test("different seeds produce different terrain", () => {
@@ -109,7 +127,7 @@ test("terrain fields stay bounded and water distance is spatially consistent", (
 		for (const neighborId of cell.neighbors) {
 			const neighbor = globe.cells[neighborId];
 			const edgeLength = Math.acos(
-				Math.max(-1, Math.min(1, cell.center.dot(neighbor.center)))
+				Math.max(-1, Math.min(1, dot(cell.center, neighbor.center)))
 			);
 			assert.ok(
 				Math.abs(cell.distanceToWater - neighbor.distanceToWater) <= edgeLength + 1e-10
@@ -146,7 +164,7 @@ test("distance to water is the shortest path along cell-center arcs", () => {
 			...cell.neighbors.map((neighborId) => {
 				const neighbor = globe.cells[neighborId];
 				const edgeLength = Math.acos(
-					Math.max(-1, Math.min(1, cell.center.dot(neighbor.center)))
+					Math.max(-1, Math.min(1, dot(cell.center, neighbor.center)))
 				);
 				return neighbor.distanceToWater + edgeLength;
 			})
