@@ -54,6 +54,7 @@ test("a population places seeded organisms on land cells without changing the wo
 			biomass: DEFAULT_PRODUCER.offspringBiomass,
 			age: 0,
 			parentId: null,
+			traits: DEFAULT_PRODUCER.founderTraits,
 		});
 		assert.notEqual(world.cells[organism.cellId].biome, "Water");
 		cellCounts.set(organism.cellId, (cellCounts.get(organism.cellId) ?? 0) + 1);
@@ -126,7 +127,14 @@ test("organisms starve, age out, die at random, and reproduce by the lifecycle r
 	const cellId = fertile.population.organisms[0].cellId;
 	stepPopulation(fertile.population, fertile.habitat);
 	close(fertile.population.organisms[0].biomass, 0.7 * 1.15 - 0.2);
-	assert.deepEqual(fertile.population.organisms[1], { id: 1, cellId, biomass: 0.2, age: 0, parentId: 0 });
+	assert.deepEqual(fertile.population.organisms[1], {
+		id: 1,
+		cellId,
+		biomass: 0.2,
+		age: 0,
+		parentId: 0,
+		traits: DEFAULT_PRODUCER.founderTraits,
+	});
 	assert.equal(fertile.population.nextId, 2);
 	assert.equal(fertile.population.lastTick.births, 1);
 	// The parent is still above the threshold, but the offspring is below it.
