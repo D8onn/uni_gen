@@ -35,18 +35,32 @@ let validAdjacentBiomes = {
 	Desert: ["Desert"],
 };
 
+export class MapGenerationError extends Error {
+	constructor(message, diagnostics) {
+		super(message);
+		this.name = "MapGenerationError";
+		this.diagnostics = diagnostics;
+	}
+}
+
 export function createMap(
 	width = 10,
 	height = 10,
 	landHeight = 5,
 	noiseScale = 45,
 	waterThreshold = 0.1,
-	mountainsThreshold = 0.9
+	mountainsThreshold = 0.9,
+	{ maxAttempts = 20, maxSteps = width * height * 4 } = {}
 ) {
-	var hexagons;
-	var result = null;
-	while (result == null) {
-		hexagons = buildMap(
+	for (const [name, value] of Object.entries({ maxAttempts, maxSteps })) {
+		if (!Number.isInteger(value) || value < 1) {
+			throw new RangeError(`${name} must be a positive integer`);
+		}
+	}
+
+	let lastFailure;
+	for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+		const hexagons = buildMap(
 			width,
 			height,
 			landHeight,
@@ -54,19 +68,30 @@ export function createMap(
 			waterThreshold,
 			mountainsThreshold
 		);
+		const result = setBiomes(hexagons, maxSteps);
+		if (!result.error) {
+			let changed = true;
+			let smoothingPasses = 0;
+			const maxSmoothingPasses = hexagons.size;
+			while (changed && smoothingPasses < maxSmoothingPasses) {
+				changed = modifyBiomes(hexagons);
+				smoothingPasses++;
+			}
+			return hexagons;
+		}
+		lastFailure = { ...result, attempt };
+	}
 
-		result = setBiomes(hexagons);
-	}
-	var changed = true;
-	while (changed == true) {
-		changed = modifyBiomes(hexagons);
-	}
-	return hexagons;
+	const reason = lastFailure.error;
+	throw new MapGenerationError(
+		`Unable to generate a valid biome map after ${maxAttempts} attempts: ${reason}`,
+		{ attempts: maxAttempts, maxSteps, reason }
+	);
 }
 
 function modifyBiomes(hexagons) {
 	var changed = false;
-	hexagons.forEach((hex, key) => {
+	hexagons.forEach((hex) => {
 		var hexBiome = hex.biome;
 		var neighbors = hex.neighbors;
 		var neighborsBiomes = {};
@@ -101,127 +126,86 @@ function buildMap(
 	waterThreshold = 0.1,
 	mountainsThreshold = 0.9
 ) {
-	const simplex = new SimplexNoise(); // the object that gives us the perlin noise map
+	const simplex = new SimplexNoise();
 	var hexagons = new Map();
 
 	for (var y = 0; y < height; y++) {
 		for (var x = 0; x < width; x++) {
-			const code = `${x},${y}`; // the code for hex's position
-			const hex = new Hex(x, y); // create a new hex object from above class
-			const nval = (simplex.noise(x / noiseScale, y / noiseScale) + 1) / 2; // standardized perline noise
-			const h = Math.pow(nval * landHeight, 1.6) / 2; // the perlin noise translated into height
+			const code = `${x},${y}`;
+			const hex = new Hex(x, y);
+			const nval = (simplex.noise(x / noiseScale, y / noiseScale) + 1) / 2;
+			const h = Math.pow(nval * landHeight, 1.6) / 2;
 
 			hex.setHeight(h);
 
 			if (hex.height < landHeight * waterThreshold) {
-				// water level
 				hex.biome = biomes[0];
 			} else if (hex.height > landHeight * mountainsThreshold) {
-				// mountains level
 				hex.biome = biomes[1];
-			} else {
 			}
 			hexagons.set(code, hex);
 		}
 	}
-	hexagons = setAdjs(hexagons);
-
-	return hexagons;
+	return setAdjs(hexagons);
 }
 
-function setBiomes(hexagons) {
-	var possibleBiomes = buildPossibleBiomes(hexagons);
+function setBiomes(hexagons, maxSteps) {
+	let steps = 0;
+	while (true) {
+		const possibleBiomes = buildPossibleBiomes(hexagons);
+		if (possibleBiomes.error) return { error: possibleBiomes.error, steps };
+		if (possibleBiomes.size === 0) return { steps };
 
-	var allowableNoChangeInterval = 10;
-	// wave function collapse for hexCodes that don't have a set biome yet
-	while (possibleBiomes.size > 0) {
-		var prevLength = possibleBiomes.size;
-		var hexCodes = [];
-		for (var i = 2; i < Object.keys(biomes).length; i++) {
-			hexCodes = [];
-			possibleBiomes.forEach((potentialBiomes, key) => {
-				if (potentialBiomes.length == i) {
-					hexCodes.push(key);
-				}
-			});
-			// we found lowest entropy
-			if (hexCodes.length > 0) {
-				break;
-			}
+		if (steps >= maxSteps) {
+			return { error: `step limit (${maxSteps}) reached`, steps };
 		}
-		if (hexCodes.length == 0) {
-			return null;
-		}
-		// now select random hex from lowest entropy hexCodes to collapse to random biome
-		var randomHexCode = hexCodes[Math.floor(Math.random() * hexCodes.length)];
-		var randomHex = hexagons.get(randomHexCode);
-		var randomBiome =
-			possibleBiomes.get(randomHexCode)[
-				Math.floor(Math.random() * possibleBiomes.get(randomHexCode).length)
-			];
-		// change the biome of the random hex to the random biome and
-		// recalculate possible biomes for other hexes
-		randomHex.biome = randomBiome;
-		possibleBiomes = buildPossibleBiomes(hexagons);
-		// if no biome changes, break the loop and end the process
-		if (possibleBiomes.length == 0) break;
-
-		if (prevLength == possibleBiomes.size) {
-			allowableNoChangeInterval--;
-		} else {
-			allowableNoChangeInterval = 10;
-		}
-		if (allowableNoChangeInterval == 0) {
-			break;
-		}
+		const lowestEntropy = Math.min(
+			...Array.from(possibleBiomes.values(), (candidates) => candidates.length)
+		);
+		const lowestEntropyHexes = Array.from(possibleBiomes.entries()).filter(
+			([, candidates]) => candidates.length === lowestEntropy
+		);
+		const [hexCode, candidates] =
+			lowestEntropyHexes[Math.floor(Math.random() * lowestEntropyHexes.length)];
+		hexagons.get(hexCode).biome =
+			candidates[Math.floor(Math.random() * candidates.length)];
+		steps++;
 	}
-	return possibleBiomes;
 }
 
 function buildPossibleBiomes(hexagons) {
 	const possibleBiomes = new Map();
-	// set the possible biomes mapping
 	hexagons.forEach((hex, key) => {
-		if (hex.biome == undefined) {
-			const adjBiomes = [];
-			const seenBiomes = [];
-			hex.neighbors.forEach((neighbor, ind) => {
-				if (!seenBiomes.includes(neighbor.biome) && neighbor.biome != undefined) {
-					seenBiomes.push(neighbor.biome);
-					adjBiomes.push(validAdjacentBiomes[neighbor.biome]);
-				}
-			});
-			// if there are neighbors with biomes such that we can get
-			// possible biomes adjacent hexCodes
-			if (adjBiomes.length > 0) {
-				possibleBiomes.set(key, biomeIntersection(adjBiomes));
-			}
-			// else we set all the possible biomes to all possible biomes
-			// except mountains or water
-			else {
-				possibleBiomes.set(key, Object.keys(validAdjacentBiomes));
-			}
-		}
-	});
+		if (hex.biome !== undefined) return;
 
-	// iterate through the possible biomes and set the hexCodes that only have 1 possible biome
-	possibleBiomes.forEach((potentialBiomes, key) => {
-		if (potentialBiomes.length == 1) {
-			hexagons.get(key).biome = potentialBiomes[0];
+		const adjacentBiomeOptions = [];
+		const seenBiomes = new Set();
+		hex.neighbors.forEach((neighbor) => {
+			if (neighbor.biome !== undefined && !seenBiomes.has(neighbor.biome)) {
+				seenBiomes.add(neighbor.biome);
+				adjacentBiomeOptions.push(validAdjacentBiomes[neighbor.biome] ?? []);
+			}
+		});
+		const candidates = adjacentBiomeOptions.length
+			? biomeIntersection(adjacentBiomeOptions)
+			: Object.keys(validAdjacentBiomes);
+		if (candidates.length === 0) {
+			possibleBiomes.error = `contradiction at cell ${key}`;
+			return;
 		}
+		possibleBiomes.set(key, candidates);
 	});
 	return possibleBiomes;
 }
 
 function biomeIntersection(arrays) {
-	let commonBiomes = arrays.reduce((prev, current) =>
+	return arrays.reduce((prev, current) =>
 		prev.filter((element) => current.includes(element))
 	);
-	return commonBiomes;
 }
 
 function setAdjs(hexagons) {
-	hexagons.forEach((val, key) => {
+	hexagons.forEach((val) => {
 		val.neighbors = [
 			checkPosition(val.x - 1, val.y, hexagons),
 			checkPosition(val.x + 1, val.y, hexagons),
@@ -233,7 +217,7 @@ function setAdjs(hexagons) {
 			val.y % 2 == 0
 				? checkPosition(val.x - 1, val.y + 1, hexagons)
 				: checkPosition(val.x + 1, val.y + 1, hexagons),
-		].filter(Boolean); // filter out null values (which means no hexagon exists in that direction)
+		].filter(Boolean);
 	});
 	return hexagons;
 }
