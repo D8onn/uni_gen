@@ -2,6 +2,11 @@
 import { createSeededRandom } from "../planet/seededRandom.js";
 import { consumeResource, getCellHabitat, RESOURCES, stepHabitat } from "./habitat.js";
 
+// Each heritable trait is the optimum of one habitat condition.
+export const TRAIT_CONDITIONS = { temperatureOptimum: "temperature", moistureOptimum: "moisture" };
+export const TRAITS = Object.keys(TRAIT_CONDITIONS);
+
+// Selection and mutation are off by default, so these defaults behave exactly like the trait-free model.
 export const DEFAULT_PRODUCER = {
 	uptake: { water: 0.05, nutrients: 0.02 },
 	growthRate: 0.2,
@@ -15,10 +20,22 @@ export const DEFAULT_PRODUCER = {
 	mortalityChance: 0.01,
 	maxPerCell: 50,
 	maxOrganisms: 100000,
+	founderTraits: { temperatureOptimum: 0.5, moistureOptimum: 0.5 },
+	selectionStrength: 0,
+	mutationRate: 0,
+	mutationSize: 0.05,
+};
+// Species overrides that turn on selection and mutation.
+export const EVOLVING_PRODUCER = {
+	founderTraits: { temperatureOptimum: 0.5, moistureOptimum: 0.5 },
+	selectionStrength: 2,
+	mutationRate: 0.1,
+	mutationSize: 0.05,
 };
 export const DEATH_CAUSES = ["starvation", "oldAge", "mortality"];
 
-const FRACTION_PARAMETERS = ["growthRate", "maintenance", "reproductionChance", "mortalityChance"];
+const FRACTION_PARAMETERS = ["growthRate", "maintenance", "reproductionChance", "mortalityChance", "mutationRate"];
+const NON_NEGATIVE_PARAMETERS = ["selectionStrength", "mutationSize"];
 const COUNT_PARAMETERS = ["maxAge", "maxPerCell", "maxOrganisms"];
 
 function resolveSpecies(overrides) {
@@ -28,10 +45,14 @@ function resolveSpecies(overrides) {
 	for (const resource of Object.keys(overrides.uptake ?? {})) {
 		if (!RESOURCES.includes(resource)) throw new RangeError(`Unknown resource: ${resource}.`);
 	}
+	for (const trait of Object.keys(overrides.founderTraits ?? {})) {
+		if (!TRAITS.includes(trait)) throw new RangeError(`Unknown trait: ${trait}.`);
+	}
 	const species = {
 		...DEFAULT_PRODUCER,
 		...overrides,
 		uptake: { ...DEFAULT_PRODUCER.uptake, ...overrides.uptake },
+		founderTraits: { ...DEFAULT_PRODUCER.founderTraits, ...overrides.founderTraits },
 	};
 	const require = (valid, message) => {
 		if (!valid) throw new RangeError(message);
@@ -42,6 +63,12 @@ function resolveSpecies(overrides) {
 	for (const name of FRACTION_PARAMETERS) {
 		const value = species[name];
 		require(Number.isFinite(value) && value >= 0 && value <= 1, `${name} must be a number from 0 to 1.`);
+	}
+	for (const [trait, value] of Object.entries(species.founderTraits)) {
+		require(Number.isFinite(value) && value >= 0 && value <= 1, `founder ${trait} must be a number from 0 to 1.`);
+	}
+	for (const name of NON_NEGATIVE_PARAMETERS) {
+		require(Number.isFinite(species[name]) && species[name] >= 0, `${name} must be a non-negative number.`);
 	}
 	for (const name of COUNT_PARAMETERS) {
 		require(Number.isInteger(species[name]) && species[name] >= 1, `${name} must be a positive integer.`);
@@ -92,7 +119,14 @@ export function createPopulation(world, { seed = 1, initialCount = 0, species = 
 		const count = cellCounts.get(cellId) ?? 0;
 		if (count >= resolved.maxPerCell) continue;
 		cellCounts.set(cellId, count + 1);
-		organisms.push({ id: organisms.length, cellId, biomass: resolved.offspringBiomass, age: 0, parentId: null });
+		organisms.push({
+			id: organisms.length,
+			cellId,
+			biomass: resolved.offspringBiomass,
+			age: 0,
+			parentId: null,
+			traits: { ...resolved.founderTraits },
+		});
 	}
 	return {
 		seed,
@@ -119,6 +153,27 @@ function feedCell(habitat, cellId, biomass, uptake) {
 	return met;
 }
 
+// How well an organism's traits suit a cell: 1 when every optimum matches its condition.
+function habitatMatch(habitat, cellId, traits, selectionStrength) {
+	let mismatch = 0;
+	for (const trait of TRAITS) {
+		mismatch += (habitat.conditions[TRAIT_CONDITIONS[trait]][cellId] - traits[trait]) ** 2;
+	}
+	return Math.exp(-selectionStrength * mismatch);
+}
+
+// Offspring copy the parent's traits; each mutates with mutationRate by a Gaussian step, clamped to 0-1.
+function inheritTraits(traits, species, random) {
+	const inherited = { ...traits };
+	if (species.mutationRate === 0) return inherited;
+	for (const trait of TRAITS) {
+		if (random() >= species.mutationRate) continue;
+		const gaussian = Math.sqrt(-2 * Math.log(1 - random())) * Math.cos(2 * Math.PI * random());
+		inherited[trait] = Math.min(1, Math.max(0, inherited[trait] + species.mutationSize * gaussian));
+	}
+	return inherited;
+}
+
 function stepOnce(population, habitat) {
 	const { species, seed, tick } = population;
 	const tally = emptyTally();
@@ -135,7 +190,8 @@ function stepOnce(population, habitat) {
 	const parents = [];
 	for (const organism of population.organisms) {
 		const light = habitat.conditions.light[organism.cellId];
-		const growth = species.growthRate * light * satisfaction.get(organism.cellId) - species.maintenance;
+		const match = habitatMatch(habitat, organism.cellId, organism.traits, species.selectionStrength);
+		const growth = species.growthRate * light * satisfaction.get(organism.cellId) * match - species.maintenance;
 		organism.biomass = Math.min(species.maxBiomass, organism.biomass * (1 + growth));
 		organism.age += 1;
 		const random = organismRandom(seed, tick, organism.id);
@@ -151,7 +207,7 @@ function stepOnce(population, habitat) {
 		}
 		survivors.push(organism);
 		if (organism.biomass >= species.reproductionBiomass && reproductionRoll < species.reproductionChance) {
-			parents.push(organism);
+			parents.push({ parent: organism, random });
 		}
 	}
 
@@ -159,7 +215,7 @@ function stepOnce(population, habitat) {
 	const cellCounts = new Map();
 	for (const { cellId } of survivors) cellCounts.set(cellId, (cellCounts.get(cellId) ?? 0) + 1);
 	const offspring = [];
-	for (const parent of parents) {
+	for (const { parent, random } of parents) {
 		const count = cellCounts.get(parent.cellId);
 		if (count >= species.maxPerCell || survivors.length + offspring.length >= species.maxOrganisms) continue;
 		cellCounts.set(parent.cellId, count + 1);
@@ -170,6 +226,7 @@ function stepOnce(population, habitat) {
 			biomass: species.offspringBiomass,
 			age: 0,
 			parentId: parent.id,
+			traits: inheritTraits(parent.traits, species, random),
 		});
 	}
 	tally.births = offspring.length;
@@ -200,12 +257,26 @@ export function getPopulationSummary(population) {
 		occupiedCells: new Set(organisms.map((organism) => organism.cellId)).size,
 		lastTick: structuredClone(population.lastTick),
 		totals: structuredClone(population.totals),
+		traits: summarizeTraits(organisms),
 	};
+}
+
+// Mean and population standard deviation of each trait, or null for an empty population.
+export function summarizeTraits(organisms) {
+	if (organisms.length === 0) return null;
+	return Object.fromEntries(
+		TRAITS.map((trait) => {
+			const mean = organisms.reduce((total, organism) => total + organism.traits[trait], 0) / organisms.length;
+			const variance =
+				organisms.reduce((total, organism) => total + (organism.traits[trait] - mean) ** 2, 0) / organisms.length;
+			return [trait, { mean, sd: Math.sqrt(variance) }];
+		})
+	);
 }
 
 export function getCellOrganisms(population, cellId) {
 	if (!Number.isInteger(cellId) || cellId < 0) throw new RangeError(`Unknown cell id: ${cellId}.`);
 	return population.organisms
 		.filter((organism) => organism.cellId === cellId)
-		.map((organism) => ({ ...organism }));
+		.map((organism) => ({ ...organism, traits: { ...organism.traits } }));
 }
