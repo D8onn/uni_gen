@@ -1,5 +1,6 @@
 import { IcosahedronGeometry, Vector3 } from "three";
 import { SimplexNoise } from "three/examples/jsm/math/SimplexNoise.js";
+import { BIOMES, classifyBiome, refineBiomes, SEA_LEVEL } from "./biomes.js";
 import { calculateClimate } from "./climate.js";
 import { calculateHydrology } from "./hydrology.js";
 import { createMinHeap } from "./minHeap.js";
@@ -17,19 +18,6 @@ const ELEVATION_OCTAVES = [
 // and mountain thresholds keep their meaning.
 const ELEVATION_SCALE =
 	1 / Math.sqrt(ELEVATION_OCTAVES.reduce((sum, { amplitude }) => sum + amplitude ** 2, 0));
-const SEA_LEVEL = -MAX_ELEVATION * 0.175;
-const MOUNTAIN_LEVEL = MAX_ELEVATION * 0.72;
-const BEACH_LEVEL = MAX_ELEVATION * 0.15;
-const BIOMES = [
-	"Water",
-	"Mountains",
-	"Grasslands",
-	"Forest",
-	"Beaches",
-	"Desert",
-	"Taiga",
-	"Chaparral",
-];
 
 function getDetailForPoleToPoleCells(cellCount) {
 	const approximateCellCount = (8 * cellCount ** 2) / (Math.sqrt(3) * Math.PI);
@@ -122,16 +110,6 @@ function calculateDistanceToWater(cells) {
 	return Array.from(distances);
 }
 
-function classifyBiome(elevation, temperature, moisture) {
-	if (elevation < SEA_LEVEL) return "Water";
-	if (elevation > MOUNTAIN_LEVEL) return "Mountains";
-	if (temperature < 0.2) return "Taiga";
-	if (temperature > 0.55 && moisture < 0.27) return "Desert";
-	if (moisture < 0.45) return "Chaparral";
-	if (moisture > 0.62) return "Forest";
-	return "Grasslands";
-}
-
 export function createGlobeMap({
 	poleToPoleCells = 80,
 	seed = 1,
@@ -219,7 +197,7 @@ export function createGlobeMap({
 			latitude,
 			elevation,
 			// Water depends only on elevation; land biomes are classified once the climate is known.
-			biome: elevation < SEA_LEVEL ? "Water" : null,
+			biome: elevation < SEA_LEVEL * MAX_ELEVATION ? "Water" : null,
 			neighbors: [...neighbors[id]].sort((a, b) => a - b),
 			boundaryFaceIds: [],
 			surfaceElevation: 0,
@@ -239,8 +217,14 @@ export function createGlobeMap({
 	for (const cell of cells) {
 		cell.temperature = climate.temperature[cell.id];
 		cell.moisture = climate.moisture[cell.id];
-		cell.biome = classifyBiome(cell.elevation, cell.temperature, cell.moisture);
 	}
+	const primaryBiomes = cells.map((cell) => {
+		const coastal = cell.neighbors.some((neighborId) => cells[neighborId].biome === "Water");
+		return classifyBiome({ ...cell, coastal }, MAX_ELEVATION);
+	});
+	for (const cell of cells) cell.biome = primaryBiomes[cell.id];
+	const refinedBiomes = refineBiomes(cells);
+	for (const cell of cells) cell.biome = refinedBiomes[cell.id];
 
 	for (const cell of cells) {
 		const referenceAxis =
@@ -266,14 +250,6 @@ export function createGlobeMap({
 	}
 
 	for (const cell of cells) {
-		if (
-			cell.biome !== "Water" &&
-			cell.temperature > 0.2 &&
-			cell.elevation < BEACH_LEVEL &&
-			cell.neighbors.some((neighborId) => cells[neighborId].biome === "Water")
-		) {
-			cell.biome = "Beaches";
-		}
 		cell.surfaceElevation =
 			cell.biome === "Water"
 				? 0

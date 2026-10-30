@@ -33,10 +33,12 @@ function hashMeshData(meshData) {
 }
 
 test("mesh data matches the geometry rendered before world data was split out", () => {
-	// From the pre-split createPlanet scene at the WG-05 commit (scripts/golden-mesh-hashes.mjs).
+	// From the pre-split createPlanet scene at the original WG-06 commit 013ac39, via
+	// `node scripts/golden-mesh-hashes.mjs 013ac39` with one manual tweak: biomeColors left out of the
+	// appended export list, because 013ac39 already exports it.
 	const goldenHashes = [
-		[80, 12345, "1562807f4de322393788c3316b7bc1f56105db274d756dafb7811bd5feed92ae"],
-		[20, 42, "b36cd037ce358acae86e3668594a3107c2f858998faf272a83f7b9a976eada1f"],
+		[80, 12345, "795ed608d3ea606769c015533691e6d3483b8e0827237bbc438e0b6533584528"],
+		[20, 42, "3f3ac69f098c64d699cab89a3aa2605d234d1f445582d05b1c101f53288b0819"],
 	];
 	for (const [poleToPoleCells, seed, expected] of goldenHashes) {
 		const world = createGlobeMap({ poleToPoleCells, seed, radius: 10 });
