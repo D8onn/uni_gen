@@ -24,6 +24,7 @@ export const DEFAULT_PRODUCER = {
 	selectionStrength: 0,
 	mutationRate: 0,
 	mutationSize: 0.05,
+	dispersalChance: 0,
 };
 // Species overrides that turn on selection and mutation.
 export const EVOLVING_PRODUCER = {
@@ -34,7 +35,14 @@ export const EVOLVING_PRODUCER = {
 };
 export const DEATH_CAUSES = ["starvation", "oldAge", "mortality"];
 
-const FRACTION_PARAMETERS = ["growthRate", "maintenance", "reproductionChance", "mortalityChance", "mutationRate"];
+const FRACTION_PARAMETERS = [
+	"growthRate",
+	"maintenance",
+	"reproductionChance",
+	"mortalityChance",
+	"mutationRate",
+	"dispersalChance",
+];
 const NON_NEGATIVE_PARAMETERS = ["selectionStrength", "mutationSize"];
 const COUNT_PARAMETERS = ["maxAge", "maxPerCell", "maxOrganisms"];
 
@@ -106,7 +114,8 @@ export function createPopulation(world, { seed = 1, initialCount = 0, species = 
 		throw new RangeError("seed must be an unsigned 32-bit integer.");
 	}
 	const resolved = resolveSpecies(species);
-	const landCellIds = world.cells.filter((cell) => cell.biome !== "Water").map((cell) => cell.id);
+	const habitable = world.cells.map((cell) => cell.biome !== "Water");
+	const landCellIds = world.cells.filter((cell) => habitable[cell.id]).map((cell) => cell.id);
 	const room = Math.min(resolved.maxOrganisms, landCellIds.length * resolved.maxPerCell);
 	if (!Number.isInteger(initialCount) || initialCount < 0 || initialCount > room) {
 		throw new RangeError(`initialCount must be an integer from 0 to ${room}.`);
@@ -136,6 +145,8 @@ export function createPopulation(world, { seed = 1, initialCount = 0, species = 
 		organisms,
 		lastTick: emptyTally(),
 		totals: emptyTally(),
+		habitable,
+		dispersals: { lastTick: 0, total: 0 },
 	};
 }
 
@@ -172,6 +183,14 @@ function inheritTraits(traits, species, random) {
 		inherited[trait] = Math.min(1, Math.max(0, inherited[trait] + species.mutationSize * gaussian));
 	}
 	return inherited;
+}
+
+// With dispersalChance, the offspring targets a uniformly chosen land neighbor (sorted by id); water is a barrier.
+function offspringCell(population, habitat, cellId, random) {
+	if (population.species.dispersalChance === 0 || random() >= population.species.dispersalChance) return cellId;
+	const landNeighbors = habitat.neighbors[cellId].filter((id) => population.habitable[id]).sort((a, b) => a - b);
+	if (landNeighbors.length === 0) return cellId;
+	return landNeighbors[Math.floor(random() * landNeighbors.length)];
 }
 
 function stepOnce(population, habitat) {
@@ -211,25 +230,32 @@ function stepOnce(population, habitat) {
 		}
 	}
 
-	// Offspring join the parent's cell, in parent-id order, while the cell and global caps allow.
+	// Offspring are admitted in parent-id order while the cell and global caps allow; a full target falls back to the parent's cell.
 	const cellCounts = new Map();
 	for (const { cellId } of survivors) cellCounts.set(cellId, (cellCounts.get(cellId) ?? 0) + 1);
 	const offspring = [];
+	let dispersed = 0;
 	for (const { parent, random } of parents) {
-		const count = cellCounts.get(parent.cellId);
+		const traits = inheritTraits(parent.traits, species, random);
+		let cellId = offspringCell(population, habitat, parent.cellId, random);
+		if ((cellCounts.get(cellId) ?? 0) >= species.maxPerCell) cellId = parent.cellId;
+		const count = cellCounts.get(cellId) ?? 0;
 		if (count >= species.maxPerCell || survivors.length + offspring.length >= species.maxOrganisms) continue;
-		cellCounts.set(parent.cellId, count + 1);
+		cellCounts.set(cellId, count + 1);
 		parent.biomass -= species.offspringBiomass;
+		if (cellId !== parent.cellId) dispersed += 1;
 		offspring.push({
 			id: population.nextId++,
-			cellId: parent.cellId,
+			cellId,
 			biomass: species.offspringBiomass,
 			age: 0,
 			parentId: parent.id,
-			traits: inheritTraits(parent.traits, species, random),
+			traits,
 		});
 	}
 	tally.births = offspring.length;
+	population.dispersals.lastTick = dispersed;
+	population.dispersals.total += dispersed;
 
 	population.organisms = [...survivors, ...offspring];
 	population.tick += 1;
@@ -258,6 +284,7 @@ export function getPopulationSummary(population) {
 		lastTick: structuredClone(population.lastTick),
 		totals: structuredClone(population.totals),
 		traits: summarizeTraits(organisms),
+		dispersals: { ...population.dispersals },
 	};
 }
 
@@ -272,6 +299,66 @@ export function summarizeTraits(organisms) {
 			return [trait, { mean, sd: Math.sqrt(variance) }];
 		})
 	);
+}
+
+// Connected groups of land cells; dispersal never crosses between them. Regions are numbered by their lowest cell id.
+export function getDispersalRegions(population, habitat) {
+	const { habitable } = population;
+	if (habitable.length !== habitat.neighbors.length) throw new RangeError("Population and habitat have different cells.");
+	const regionOfCell = habitable.map(() => -1);
+	let regionCount = 0;
+	for (let start = 0; start < habitable.length; start++) {
+		if (!habitable[start] || regionOfCell[start] !== -1) continue;
+		regionOfCell[start] = regionCount;
+		const stack = [start];
+		while (stack.length > 0) {
+			for (const neighborId of habitat.neighbors[stack.pop()]) {
+				if (!habitable[neighborId] || regionOfCell[neighborId] !== -1) continue;
+				regionOfCell[neighborId] = regionCount;
+				stack.push(neighborId);
+			}
+		}
+		regionCount += 1;
+	}
+	return { regionOfCell, regionCount };
+}
+
+// Per-group counts and traits for occupied groups (groupOfCell maps cell id to a group id), plus how trait variance splits within and between groups.
+export function summarizeGroups(population, groupOfCell) {
+	const members = new Map();
+	for (const organism of population.organisms) {
+		const group = groupOfCell[organism.cellId];
+		if (!Number.isInteger(group)) throw new RangeError(`Cell ${organism.cellId} has no group.`);
+		if (!members.has(group)) members.set(group, []);
+		members.get(group).push(organism);
+	}
+	const groups = [...members.keys()]
+		.sort((a, b) => a - b)
+		.map((group) => {
+			const organisms = members.get(group);
+			return {
+				group,
+				count: organisms.length,
+				totalBiomass: organisms.reduce((total, organism) => total + organism.biomass, 0),
+				occupiedCells: new Set(organisms.map((organism) => organism.cellId)).size,
+				traits: summarizeTraits(organisms),
+			};
+		});
+	const overall = summarizeTraits(population.organisms);
+	if (overall === null) return { groups, divergence: null };
+	const total = population.organisms.length;
+	const divergence = Object.fromEntries(
+		TRAITS.map((trait) => {
+			let within = 0;
+			let between = 0;
+			for (const { count, traits } of groups) {
+				within += (count * traits[trait].sd ** 2) / total;
+				between += (count * (traits[trait].mean - overall[trait].mean) ** 2) / total;
+			}
+			return [trait, { within, between, betweenShare: within + between > 0 ? between / (within + between) : null }];
+		})
+	);
+	return { groups, divergence };
 }
 
 export function getCellOrganisms(population, cellId) {
