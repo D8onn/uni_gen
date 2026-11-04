@@ -5,6 +5,7 @@ import { computeCellColors } from "./cellViews.js";
 import { createGlobeMap } from "./createGlobeMap.js";
 import { addLighting } from "./lighting.js";
 import { buildCellMeshData, buildPlanetMeshData, paintCellColors } from "./planetMeshData.js";
+import { createMarkerAnimator } from "./markerAnimation.js";
 import { getMarkerSize, MAX_MARKERS } from "./populationMarkers.js";
 import { createRandomSeed } from "./seededRandom.js";
 
@@ -130,31 +131,30 @@ function addTrees(scene, meshData, treeModel) {
 }
 
 const MARKER_LIFT = 0.5; // a marker sits half a radius above the surface
-const MARKER_GLIDE_SECONDS = 0.25; // time constant for a marker moving to its new cell
 
-// Instanced spheres marking groups of organisms. Each marker keeps a direction, a height, and a radius that ease toward their targets.
+// Instanced spheres marking groups of organisms; `createMarkerAnimator` decides where each one is drawn.
 function addMarkers(scene, globe) {
+	const capacity = MAX_MARKERS * 2; // markers still shrinking into their neighbours count too
 	const mesh = new THREE.InstancedMesh(
 		new THREE.IcosahedronGeometry(1, 1),
 		new THREE.MeshLambertMaterial({ color: 0xff5fa2, emissive: 0x4a1030 }),
-		MAX_MARKERS
+		capacity
 	);
 	mesh.count = 0;
 	mesh.frustumCulled = false; // the instances move, so the base geometry's bounds do not apply
 	scene.add(mesh);
 
-	const targets = [];
-	const current = [];
+	const animator = createMarkerAnimator({ maxMarkers: capacity });
 	const matrix = new THREE.Matrix4();
 	const direction = new THREE.Vector3();
 
 	function write() {
-		current.forEach(({ direction: [x, y, z], height, radius }, index) => {
+		animator.markers.forEach(({ direction: [x, y, z], height, radius }, index) => {
 			direction.set(x, y, z).normalize();
 			matrix.makeScale(radius, radius, radius).setPosition(direction.multiplyScalar(height));
 			mesh.setMatrixAt(index, matrix);
 		});
-		mesh.count = current.length;
+		mesh.count = animator.markers.length;
 		mesh.instanceMatrix.needsUpdate = true;
 	}
 
@@ -162,36 +162,16 @@ function addMarkers(scene, globe) {
 		mesh,
 		set(markerCells, unit) {
 			const radius = getMarkerSize(unit) * globe.radius;
-			targets.length = 0;
-			for (const { cellId } of markerCells) {
-				const cell = globe.cells[cellId];
-				targets.push({ direction: [...cell.center], height: globe.radius + cell.surfaceElevation + radius * MARKER_LIFT, radius });
-			}
-			current.length = Math.min(current.length, targets.length);
-			targets.forEach((target, index) => {
-				current[index] ??= { ...target, direction: [...target.direction] };
-			});
+			animator.set(
+				markerCells.map(({ cellId }) => {
+					const cell = globe.cells[cellId];
+					return { direction: [...cell.center], height: globe.radius + cell.surfaceElevation + radius * MARKER_LIFT, radius };
+				})
+			);
 			write();
 		},
-		// Eases each marker toward its target over about MARKER_GLIDE_SECONDS, redrawing only while something moves.
 		animate(seconds) {
-			if (seconds <= 0) return;
-			const share = 1 - Math.exp(-seconds / MARKER_GLIDE_SECONDS);
-			let moving = false;
-			current.forEach((marker, index) => {
-				const target = targets[index];
-				for (let axis = 0; axis < 3; axis++) {
-					const step = (target.direction[axis] - marker.direction[axis]) * share;
-					marker.direction[axis] += step;
-					moving ||= Math.abs(step) > 1e-6;
-				}
-				const heightStep = (target.height - marker.height) * share;
-				const radiusStep = (target.radius - marker.radius) * share;
-				marker.height += heightStep;
-				marker.radius += radiusStep;
-				moving ||= Math.abs(heightStep) > 1e-5 || Math.abs(radiusStep) > 1e-5;
-			});
-			if (moving) write();
+			if (animator.step(seconds)) write();
 		},
 	};
 }

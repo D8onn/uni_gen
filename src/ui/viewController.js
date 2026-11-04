@@ -27,7 +27,8 @@ export function createViewController({ planet, client }) {
 
 	function updateMarkers() {
 		const organisms = snapshot.summary.count;
-		unit = getMarkerUnit(organisms, unit);
+		// A run has no history at tick 0, so a restart does not inherit the previous run's marker size.
+		unit = getMarkerUnit(organisms, snapshot.summary.tick === 0 ? SMALL_UNIT : unit);
 		const markers = placeMarkers(planet.world, snapshot.cells.count, unit);
 		planet.setMarkers(markers, unit);
 		markerInfo = { unit, shown: markers.length, organisms };

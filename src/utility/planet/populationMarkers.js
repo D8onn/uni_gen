@@ -5,7 +5,8 @@ export const SMALL_UNIT = 100;
 export const LARGE_UNIT = 1000;
 export const LARGE_UNIT_FROM = 10000;
 export const SMALL_UNIT_BELOW = 8000;
-export const MAX_MARKERS = 128; // a larger population gets proportionally larger groups instead of more markers
+// A safety net: with the default limit of 100,000 organisms there are at most 100 markers. A larger population gets larger groups instead of more markers.
+export const MAX_MARKERS = 128;
 
 // A marker's radius as a fraction of the planet's radius; the large marker is twice the size.
 const MARKER_SIZES = new Map([
