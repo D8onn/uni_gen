@@ -35,31 +35,40 @@ export function getSurfaceType(cell) {
 	return cell.hasRiver ? "River" : cell.biome;
 }
 
-// Returns { surfaces: [{ type, color, positions }], edgePositions, trees: [{ position, normal }] }.
-export function buildPlanetMeshData(world) {
-	const { radius } = world;
-	// Each boundary corner sits at the mean surface elevation of the three cells meeting there.
-	const facePositions = world.faces.map((face) => {
+// Each boundary corner sits at the mean surface elevation of the three cells meeting there.
+function getFacePositions(world) {
+	return world.faces.map((face) => {
 		const averageElevation =
 			face.cellIds.reduce((sum, id) => sum + world.cells[id].surfaceElevation, 0) /
 			face.cellIds.length;
-		return scale(face.center, radius + averageElevation);
+		return scale(face.center, world.radius + averageElevation);
 	});
+}
+
+// Appends the cell's triangles (centre, corner, next corner), each wound to face outward.
+function pushCellTriangles(positions, cell, facePositions, radius) {
+	const center = scale(cell.center, radius + cell.surfaceElevation);
+	const corners = cell.boundaryFaceIds;
+	for (let index = 0; index < corners.length; index++) {
+		let pointA = facePositions[corners[index]];
+		let pointB = facePositions[corners[(index + 1) % corners.length]];
+		const normal = cross(subtract(pointA, center), subtract(pointB, center));
+		if (dot(normal, center) < 0) [pointA, pointB] = [pointB, pointA];
+		positions.push(...center, ...pointA, ...pointB);
+	}
+}
+
+// Returns { surfaces: [{ type, color, positions }], edgePositions, trees: [{ position, normal }] }.
+export function buildPlanetMeshData(world) {
+	const { radius } = world;
+	const facePositions = getFacePositions(world);
 	const positionsByType = new Map([...SURFACE_COLORS.keys()].map((type) => [type, []]));
 
 	for (const cell of world.cells) {
 		const type = getSurfaceType(cell);
 		const positions = positionsByType.get(type);
 		if (!positions) throw new Error(`No surface colour for "${type}".`);
-		const center = scale(cell.center, radius + cell.surfaceElevation);
-		const corners = cell.boundaryFaceIds;
-		for (let index = 0; index < corners.length; index++) {
-			let pointA = facePositions[corners[index]];
-			let pointB = facePositions[corners[(index + 1) % corners.length]];
-			const normal = cross(subtract(pointA, center), subtract(pointB, center));
-			if (dot(normal, center) < 0) [pointA, pointB] = [pointB, pointA];
-			positions.push(...center, ...pointA, ...pointB);
-		}
+		pushCellTriangles(positions, cell, facePositions, radius);
 	}
 
 	const surfaces = [];
@@ -82,4 +91,39 @@ export function buildPlanetMeshData(world) {
 		}));
 
 	return { surfaces, edgePositions, trees };
+}
+
+// Returns every cell's triangles in cell order as { positions, cellVertexStart }: cell `id` owns vertices
+// cellVertexStart[id] up to (not including) cellVertexStart[id + 1], so a cell can be recoloured in place.
+export function buildCellMeshData(world) {
+	const facePositions = getFacePositions(world);
+	const positions = [];
+	const cellVertexStart = new Uint32Array(world.cells.length + 1);
+	for (const cell of world.cells) {
+		pushCellTriangles(positions, cell, facePositions, world.radius);
+		cellVertexStart[cell.id + 1] = positions.length / 3;
+	}
+	return { positions: new Float32Array(positions), cellVertexStart };
+}
+
+// Converts an sRGB channel (0-1) to the linear value three.js expects in vertex colours.
+function srgbToLinear(channel) {
+	return channel <= 0.04045 ? channel * 0.0773993808 : ((channel * 0.9478672986 + 0.0521327014) ** 2.4);
+}
+
+// Writes each cell's sRGB colour (`cellColors`, three floats per cell) into `target` as linear colours on all of its vertices.
+export function paintCellColors(target, cellVertexStart, cellColors) {
+	const cellCount = cellVertexStart.length - 1;
+	if (cellColors.length !== cellCount * 3) throw new RangeError("cellColors needs three values per cell.");
+	if (target.length !== cellVertexStart[cellCount] * 3) throw new RangeError("target needs three values per vertex.");
+	for (let id = 0; id < cellCount; id++) {
+		const red = srgbToLinear(cellColors[id * 3]);
+		const green = srgbToLinear(cellColors[id * 3 + 1]);
+		const blue = srgbToLinear(cellColors[id * 3 + 2]);
+		for (let vertex = cellVertexStart[id] * 3; vertex < cellVertexStart[id + 1] * 3; vertex += 3) {
+			target[vertex] = red;
+			target[vertex + 1] = green;
+			target[vertex + 2] = blue;
+		}
+	}
 }

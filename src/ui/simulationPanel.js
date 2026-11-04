@@ -29,11 +29,12 @@ function sum(values) {
 }
 
 /**
- * Adds the panel to the page. `params` are the settings the simulation was started with.
+ * Adds the panel to the page. `params` are the settings the simulation was started with, and `views`
+ * is a view controller (`list` of views; `select(id)` applies one and returns its legend).
  * Apply restarts the simulation with the entered settings; changing the seed reloads the page
  * because the globe is built for one seed. Reset restarts with the last applied settings.
  */
-export function createSimulationPanel({ client, params }) {
+export function createSimulationPanel({ client, params, views }) {
 	let applied = params;
 	let running = false;
 
@@ -57,6 +58,21 @@ export function createSimulationPanel({ client, params }) {
 	const message = element("div", { role: "alert", style: "color: #ff9c8f; min-height: 1.4em; margin-bottom: 4px;" });
 	const stats = element("pre", { style: "margin: 0; font: inherit; white-space: pre-wrap;" });
 
+	const viewSelect = element("select", { style: INPUT_STYLE }, views.list.map(({ id, label }) => element("option", { value: id, text: label })));
+	const legend = element("div", { style: "min-height: 36px; margin-bottom: 8px;" });
+
+	function showLegend(viewLegend) {
+		legend.replaceChildren();
+		if (!viewLegend) return;
+		const bar = element("div", { style: `height: 10px; border-radius: 2px; background: linear-gradient(to right, ${viewLegend.stops.join(", ")});` });
+		const ends = element("div", { style: "display: flex; justify-content: space-between;" }, [
+			element("span", { text: viewLegend.low }),
+			element("span", { text: viewLegend.high }),
+		]);
+		legend.append(element("div", { text: `${viewLegend.title} (unitless)` }), bar, ends);
+	}
+	viewSelect.addEventListener("change", () => showLegend(views.select(viewSelect.value)));
+
 	const form = element("form", { noValidate: true }, [
 		...fields,
 		rows(playButton, stepButton),
@@ -66,6 +82,8 @@ export function createSimulationPanel({ client, params }) {
 	]);
 	const panel = element("section", { style: PANEL_STYLE }, [
 		element("strong", { text: "Simulation", style: "display: block; margin-bottom: 8px;" }),
+		element("label", { style: FIELD_STYLE }, [element("span", { text: "View" }), viewSelect]),
+		legend,
 		form,
 	]);
 	document.body.appendChild(panel);

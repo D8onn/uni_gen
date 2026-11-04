@@ -2,10 +2,13 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import * as THREE from "three";
 import { createGlobeMap } from "../src/utility/planet/createGlobeMap.js";
 import {
+	buildCellMeshData,
 	buildPlanetMeshData,
 	getSurfaceType,
+	paintCellColors,
 	SURFACE_COLORS,
 } from "../src/utility/planet/planetMeshData.js";
 
@@ -127,4 +130,47 @@ test("building mesh data reads the world without changing it or needing Three.js
 		"utf8"
 	);
 	assert.doesNotMatch(source, /from\s+["']three/);
+});
+
+test("the cell mesh holds the same triangles as the surface meshes, grouped by cell", () => {
+	const world = createGlobeMap({ poleToPoleCells: 20, seed: 1, radius: 10 });
+	const { positions, cellVertexStart } = buildCellMeshData(world);
+	assert.equal(cellVertexStart.length, world.cells.length + 1);
+	assert.equal(cellVertexStart[0], 0);
+	for (const cell of world.cells) {
+		assert.equal(cellVertexStart[cell.id + 1] - cellVertexStart[cell.id], cell.boundaryFaceIds.length * 3);
+	}
+	assert.equal(cellVertexStart[world.cells.length] * 3, positions.length);
+
+	const triangles = (flat) => {
+		const keys = [];
+		for (let offset = 0; offset < flat.length; offset += 9) keys.push(Array.from(flat.slice(offset, offset + 9)).join(","));
+		return keys.sort();
+	};
+	const fromSurfaces = buildPlanetMeshData(world).surfaces.flatMap(({ positions: surface }) =>
+		triangles(new Float32Array(surface))
+	);
+	assert.deepEqual(triangles(positions), fromSurfaces.sort());
+});
+
+test("painting a cell colours exactly its own vertices, converting sRGB to linear like three.js", () => {
+	const world = createGlobeMap({ poleToPoleCells: 12, seed: 5, radius: 10 });
+	const { positions, cellVertexStart } = buildCellMeshData(world);
+	const cellColors = new Float32Array(world.cells.length * 3);
+	world.cells.forEach((cell, id) => cellColors.set([(id % 7) / 6, (id % 5) / 4, ((id * 3) % 11) / 10], id * 3));
+	const target = new Float32Array(positions.length).fill(-1);
+	paintCellColors(target, cellVertexStart, cellColors);
+
+	const expected = new THREE.Color();
+	for (const cell of world.cells) {
+		expected.setRGB(cellColors[cell.id * 3], cellColors[cell.id * 3 + 1], cellColors[cell.id * 3 + 2], THREE.SRGBColorSpace);
+		for (let vertex = cellVertexStart[cell.id]; vertex < cellVertexStart[cell.id + 1]; vertex++) {
+			assert.ok(Math.abs(target[vertex * 3] - expected.r) < 1e-5, `cell ${cell.id} red`);
+			assert.ok(Math.abs(target[vertex * 3 + 1] - expected.g) < 1e-5, `cell ${cell.id} green`);
+			assert.ok(Math.abs(target[vertex * 3 + 2] - expected.b) < 1e-5, `cell ${cell.id} blue`);
+		}
+	}
+	assert.equal(target.includes(-1), false);
+	assert.throws(() => paintCellColors(target, cellVertexStart, new Float32Array(3)), RangeError);
+	assert.throws(() => paintCellColors(new Float32Array(3), cellVertexStart, cellColors), RangeError);
 });
