@@ -46,6 +46,9 @@ const FRACTION_PARAMETERS = [
 const NON_NEGATIVE_PARAMETERS = ["selectionStrength", "mutationSize"];
 const COUNT_PARAMETERS = ["maxAge", "maxPerCell", "maxOrganisms"];
 
+// Below this total variance a trait is, for any real organism, identical everywhere: the rest is rounding noise, which must not read as a share.
+const NEGLIGIBLE_VARIANCE = 1e-12;
+
 function resolveSpecies(overrides) {
 	for (const name of Object.keys(overrides)) {
 		if (!(name in DEFAULT_PRODUCER)) throw new RangeError(`Unknown species parameter: ${name}.`);
@@ -323,6 +326,7 @@ export function getDispersalRegions(population, habitat) {
 	return { regionOfCell, regionCount };
 }
 
+// The reference for `getGroupDivergence`, which gives the same `divergence` from one pass; keep the two in step (a test compares them).
 // Per-group counts and traits for occupied groups (groupOfCell maps cell id to a group id), plus how trait variance splits within and between groups.
 export function summarizeGroups(population, groupOfCell) {
 	const members = new Map();
@@ -355,7 +359,7 @@ export function summarizeGroups(population, groupOfCell) {
 				within += (count * traits[trait].sd ** 2) / total;
 				between += (count * (traits[trait].mean - overall[trait].mean) ** 2) / total;
 			}
-			return [trait, { within, between, betweenShare: within + between > 0 ? between / (within + between) : null }];
+			return [trait, { within, between, betweenShare: within + between > NEGLIGIBLE_VARIANCE ? between / (within + between) : null }];
 		})
 	);
 	return { groups, divergence };
@@ -366,6 +370,59 @@ export function getCellCounts(population) {
 	const counts = new Uint32Array(population.habitable.length);
 	for (const { cellId } of population.organisms) counts[cellId] += 1;
 	return counts;
+}
+
+// The mean of each trait in every cell as `{ traitName: Float32Array }` indexed by cell id, NaN where a cell has no organisms.
+export function getCellTraitMeans(population) {
+	const cellCount = population.habitable.length;
+	const counts = new Uint32Array(cellCount);
+	const sums = Object.fromEntries(TRAITS.map((trait) => [trait, new Float64Array(cellCount)]));
+	for (const { cellId, traits } of population.organisms) {
+		counts[cellId] += 1;
+		for (const trait of TRAITS) sums[trait][cellId] += traits[trait];
+	}
+	return Object.fromEntries(
+		TRAITS.map((trait) => [trait, Float32Array.from(sums[trait], (sum, id) => (counts[id] > 0 ? sum / counts[id] : Number.NaN))])
+	);
+}
+
+/**
+ * How each trait's variance splits within and between groups, as `{ occupied, divergence }`: the number of groups holding
+ * organisms and the same `divergence` that `summarizeGroups` reports (null for an empty population), but from one pass over the
+ * organisms, so it is cheap enough to run on every snapshot. `summarizeGroups` is the reference it is tested against; keep the two in step. `groupOfCell` maps each cell id to its group id.
+ */
+export function getGroupDivergence(population, groupOfCell) {
+	const { organisms } = population;
+	const groups = new Map();
+	for (const { cellId, traits } of organisms) {
+		const group = groupOfCell[cellId];
+		if (!Number.isInteger(group)) throw new RangeError(`Cell ${cellId} has no group.`);
+		if (!groups.has(group)) groups.set(group, { count: 0, sums: TRAITS.map(() => 0), squares: TRAITS.map(() => 0) });
+		const entry = groups.get(group);
+		entry.count += 1;
+		TRAITS.forEach((trait, index) => {
+			entry.sums[index] += traits[trait];
+			entry.squares[index] += traits[trait] ** 2;
+		});
+	}
+	if (organisms.length === 0) return { occupied: 0, divergence: null };
+	const total = organisms.length;
+	const divergence = Object.fromEntries(
+		TRAITS.map((trait, index) => {
+			let overall = 0;
+			for (const { sums } of groups.values()) overall += sums[index];
+			overall /= total;
+			let within = 0;
+			let between = 0;
+			for (const { count, sums, squares } of groups.values()) {
+				const mean = sums[index] / count;
+				within += (count * Math.max(0, squares[index] / count - mean ** 2)) / total;
+				between += (count * (mean - overall) ** 2) / total;
+			}
+			return [trait, { within, between, betweenShare: within + between > NEGLIGIBLE_VARIANCE ? between / (within + between) : null }];
+		})
+	);
+	return { occupied: groups.size, divergence };
 }
 
 export function getCellOrganisms(population, cellId) {

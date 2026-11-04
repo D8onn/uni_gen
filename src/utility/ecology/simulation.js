@@ -5,6 +5,9 @@ import {
 	EVOLVING_PRODUCER,
 	getCellCounts,
 	getCellOrganisms,
+	getCellTraitMeans,
+	getDispersalRegions,
+	getGroupDivergence,
 	getPopulationSummary,
 	stepPopulation,
 } from "./population.js";
@@ -25,7 +28,7 @@ export function createSimulation() {
 		const species = { ...SPECIES_PRESETS[params.species], dispersalChance: params.dispersal };
 		const habitat = createHabitat(world);
 		const population = createPopulation(world, { seed: params.seed, initialCount: params.founders, species });
-		state = { params, habitat, population };
+		state = { params, habitat, population, regions: getDispersalRegions(population, habitat) }; // regions never change once the world is fixed
 	}
 
 	function requireState() {
@@ -57,15 +60,18 @@ export function createSimulation() {
 		},
 		// Plain data safe to post to the main thread; `cells` holds one entry per cell id and is a fresh copy each call.
 		snapshot() {
-			const { params, habitat, population } = requireState();
+			const { params, habitat, population, regions } = requireState();
 			return {
 				params: { ...params },
 				summary: getPopulationSummary(population),
 				maxPerCell: population.species.maxPerCell,
+				groups: { regions: regions.regionCount, ...getGroupDivergence(population, regions.regionOfCell) },
 				cells: {
 					waterFill: getResourceFill(habitat, "water"),
 					nutrientFill: getResourceFill(habitat, "nutrients"),
 					count: getCellCounts(population),
+					...getCellTraitMeans(population),
+					region: Int32Array.from(regions.regionOfCell),
 				},
 			};
 		},

@@ -10,7 +10,7 @@ const RATE_WINDOW_MS = 1000;
 /**
  * Handles `world` {input}, `configure` {params}, `reset`, `play`, `pause`, `step` {ticks}, `speed` {ticksPerSecond}, and
  * `inspect` {cellId} (a cell id, or null to stop) messages.
- * Every outcome is posted back as `snapshot` {params, running, ticksPerSecond, summary, maxPerCell, cells} or `error` {message};  `cells` holds per-cell typed arrays indexed by cell id.
+ * Every outcome is posted back as `snapshot` {params, running, ticksPerSecond, summary, maxPerCell, groups, cells} or `error` {message};  `groups` is `{ regions, occupied, divergence }` (see `getGroupDivergence`); `cells` holds per-cell typed arrays indexed by cell id.
  * While a cell is being inspected, each snapshot is followed by a `cell` message with that cell's habitat and organisms (`inspectCell`).
  * `post(message, transferList)` receives the buffers to transfer. `now`, `schedule`, and `cancel` are injectable so tests can drive the clock.
  */
@@ -35,9 +35,9 @@ export function createSimulationController({
 
 	function postSnapshot() {
 		lastPost = now();
-		const { params, summary, maxPerCell, cells } = simulation.snapshot();
+		const { params, summary, maxPerCell, groups, cells } = simulation.snapshot();
 		// The per-cell arrays are fresh copies, so their buffers move to the page without copying.
-		post({ type: "snapshot", params: { ...params, speed }, running, ticksPerSecond, summary, maxPerCell, cells }, Object.values(cells).map((array) => array.buffer));
+		post({ type: "snapshot", params: { ...params, speed }, running, ticksPerSecond, summary, maxPerCell, groups, cells }, Object.values(cells).map((array) => array.buffer));
 		if (inspected !== null) post({ type: "cell", ...simulation.inspectCell(inspected) });
 	}
 
