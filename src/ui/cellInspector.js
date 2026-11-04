@@ -1,5 +1,6 @@
 // Panel for the clicked cell: its world data and, from the worker, its habitat and organisms, kept current as ticks advance.
 import { describeCell } from "./cellDescription.js";
+import { createInspection, shouldClearOnKey } from "./inspection.js";
 
 const PANEL_STYLE = `
 	position: fixed; left: 12px; bottom: 12px; width: 300px; max-height: 60vh; overflow-y: auto; padding: 12px; box-sizing: border-box;
@@ -18,11 +19,11 @@ function element(tag, { style, text, ...properties } = {}, children = []) {
 }
 
 /**
- * Clicking a cell selects it (a click on empty space, Escape, or Close clears it): the planet outlines it, the worker is
- * asked to inspect it (`client.inspect`), and the panel redraws with each `cell` message that follows every snapshot.
+ * Clicking a cell selects it (a click on empty space, Escape outside a field, or Close clears it): the planet outlines it,
+ * the worker is asked to inspect it (`client.inspect`), and the panel redraws with each `cell` message that follows every snapshot.
  */
 export function createCellInspector({ planet, client }) {
-	let selected = null;
+	const inspection = createInspection({ planet, client });
 	const title = element("strong");
 	const close = element("button", { type: "button", text: "Close", style: "font: inherit; cursor: pointer;" });
 	const body = element("div", { style: "margin-top: 8px;" });
@@ -33,15 +34,13 @@ export function createCellInspector({ planet, client }) {
 	document.body.appendChild(panel);
 
 	function select(cellId) {
-		selected = cellId;
-		planet.setSelectedCell(cellId);
-		client.inspect(cellId);
+		if (!inspection.select(cellId)) return; // the same cell again: keep showing its details
 		panel.style.display = cellId === null ? "none" : "block";
 		if (cellId !== null) render(null);
 	}
 
 	function render(data) {
-		const description = describeCell(planet.world.cells[selected], data);
+		const description = describeCell(planet.world.cells[inspection.selected], data);
 		title.textContent = description.title;
 		body.replaceChildren(
 			...description.rows.map(([label, value]) => element("div", { style: ROW_STYLE }, [element("span", { text: label }), element("span", { text: value })]))
@@ -72,9 +71,9 @@ export function createCellInspector({ planet, client }) {
 
 	planet.onCellClick((cellId) => select(cellId));
 	close.addEventListener("click", () => select(null));
-	window.addEventListener("keydown", (event) => event.key === "Escape" && selected !== null && select(null));
+	window.addEventListener("keydown", (event) => shouldClearOnKey(event) && select(null));
 	client.subscribe((message) => {
-		if (message.type === "cell" && message.cellId === selected) render(message);
+		if (inspection.accepts(message)) render(message);
 	});
 	return panel;
 }
