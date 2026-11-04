@@ -46,6 +46,9 @@ const FRACTION_PARAMETERS = [
 const NON_NEGATIVE_PARAMETERS = ["selectionStrength", "mutationSize"];
 const COUNT_PARAMETERS = ["maxAge", "maxPerCell", "maxOrganisms"];
 
+// Below this total variance a trait is, for any real organism, identical everywhere: the rest is rounding noise, which must not read as a share.
+const NEGLIGIBLE_VARIANCE = 1e-12;
+
 function resolveSpecies(overrides) {
 	for (const name of Object.keys(overrides)) {
 		if (!(name in DEFAULT_PRODUCER)) throw new RangeError(`Unknown species parameter: ${name}.`);
@@ -323,6 +326,7 @@ export function getDispersalRegions(population, habitat) {
 	return { regionOfCell, regionCount };
 }
 
+// The reference for `getGroupDivergence`, which gives the same `divergence` from one pass; keep the two in step (a test compares them).
 // Per-group counts and traits for occupied groups (groupOfCell maps cell id to a group id), plus how trait variance splits within and between groups.
 export function summarizeGroups(population, groupOfCell) {
 	const members = new Map();
@@ -355,7 +359,7 @@ export function summarizeGroups(population, groupOfCell) {
 				within += (count * traits[trait].sd ** 2) / total;
 				between += (count * (traits[trait].mean - overall[trait].mean) ** 2) / total;
 			}
-			return [trait, { within, between, betweenShare: within + between > 0 ? between / (within + between) : null }];
+			return [trait, { within, between, betweenShare: within + between > NEGLIGIBLE_VARIANCE ? between / (within + between) : null }];
 		})
 	);
 	return { groups, divergence };
@@ -385,7 +389,7 @@ export function getCellTraitMeans(population) {
 /**
  * How each trait's variance splits within and between groups, as `{ occupied, divergence }`: the number of groups holding
  * organisms and the same `divergence` that `summarizeGroups` reports (null for an empty population), but from one pass over the
- * organisms, so it is cheap enough to run on every snapshot. `groupOfCell` maps each cell id to its group id.
+ * organisms, so it is cheap enough to run on every snapshot. `summarizeGroups` is the reference it is tested against; keep the two in step. `groupOfCell` maps each cell id to its group id.
  */
 export function getGroupDivergence(population, groupOfCell) {
 	const { organisms } = population;
@@ -415,7 +419,7 @@ export function getGroupDivergence(population, groupOfCell) {
 				within += (count * Math.max(0, squares[index] / count - mean ** 2)) / total;
 				between += (count * (mean - overall) ** 2) / total;
 			}
-			return [trait, { within, between, betweenShare: within + between > 0 ? between / (within + between) : null }];
+			return [trait, { within, between, betweenShare: within + between > NEGLIGIBLE_VARIANCE ? between / (within + between) : null }];
 		})
 	);
 	return { occupied: groups.size, divergence };

@@ -93,3 +93,48 @@ test("group divergence rejects an organism whose cell has no group", () => {
 	assert.throws(() => getGroupDivergence(population, world.cells.map(() => undefined)), RangeError);
 	assert.throws(() => getGroupDivergence(population, world.cells.map(() => -1.5)), RangeError);
 });
+
+// A population of `count` organisms whose traits are all `value` (or `value` plus a small step per organism), laid out in groups.
+function withTraits(count, value, step = 0) {
+	const population = createPopulation(world, { seed: 1, initialCount: count });
+	population.organisms.forEach((organism, index) => {
+		organism.traits = { temperatureOptimum: value + step * index, moistureOptimum: value };
+	});
+	return population;
+}
+
+test("identical traits give no share, whatever the value or the grouping, rather than a share made of rounding noise", () => {
+	const layouts = [
+		world.cells.map((cell) => cell.id % 3),
+		world.cells.map((cell) => cell.id % 2),
+		world.cells.map((cell) => Math.floor(cell.id / 40)),
+		world.cells.map((cell) => (cell.id * 7919) % 5),
+	];
+	for (const value of [0.5, 0.3, 0.6, 0.1, 0.7, 1 / 3, 0.9, 0.05, 0.123456789]) {
+		for (const count of [7, 50, 300]) {
+			const population = withTraits(count, value);
+			for (const [index, groupOfCell] of layouts.entries()) {
+				const label = `value ${value}, ${count} organisms, layout ${index}`;
+				const mine = getGroupDivergence(population, groupOfCell).divergence;
+				const reference = summarizeGroups(population, groupOfCell).divergence;
+				for (const trait of TRAITS) {
+					assert.equal(mine[trait].betweenShare, null, `getGroupDivergence, ${trait}, ${label}`);
+					assert.equal(reference[trait].betweenShare, null, `summarizeGroups, ${trait}, ${label}`);
+				}
+			}
+		}
+	}
+});
+
+test("a real but small difference between organisms still gives a share, equal in both functions", () => {
+	// 0.0001 apart gives a variance of about 1e-6 on the temperature optimum, far above rounding noise.
+	const population = withTraits(60, 0.4, 0.0001);
+	const groupOfCell = world.cells.map((cell) => cell.id % 3);
+	const mine = getGroupDivergence(population, groupOfCell).divergence;
+	const reference = summarizeGroups(population, groupOfCell).divergence;
+	assert.notEqual(mine.temperatureOptimum.betweenShare, null);
+	assert.ok(mine.temperatureOptimum.within + mine.temperatureOptimum.between > 1e-7);
+	assert.ok(Math.abs(mine.temperatureOptimum.betweenShare - reference.temperatureOptimum.betweenShare) < 1e-6);
+	assert.equal(mine.moistureOptimum.betweenShare, null, "the other trait is identical everywhere");
+	assert.equal(reference.moistureOptimum.betweenShare, null);
+});
