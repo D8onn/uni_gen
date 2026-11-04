@@ -361,6 +361,13 @@ export function summarizeGroups(population, groupOfCell) {
 	return { groups, divergence };
 }
 
+// The number of organisms in each cell, indexed by cell id.
+export function getCellCounts(population) {
+	const counts = new Uint32Array(population.habitable.length);
+	for (const { cellId } of population.organisms) counts[cellId] += 1;
+	return counts;
+}
+
 export function getCellOrganisms(population, cellId) {
 	if (!Number.isInteger(cellId) || cellId < 0) throw new RangeError(`Unknown cell id: ${cellId}.`);
 	return population.organisms

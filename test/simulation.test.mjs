@@ -283,14 +283,15 @@ test("each snapshot carries fresh per-cell stock fills whose buffers are transfe
 	harness.controller.handle({ type: "configure", params: PARAMS });
 	const cellCount = worldFor(PARAMS.seed).cells.length;
 	const first = harness.last("snapshot");
-	assert.deepEqual(Object.keys(first.cells), ["waterFill", "nutrientFill"]);
+	assert.deepEqual(Object.keys(first.cells), ["waterFill", "nutrientFill", "count"]);
 	for (const array of Object.values(first.cells)) {
-		assert.ok(array instanceof Float32Array);
+		assert.ok(array instanceof Float32Array || array instanceof Uint32Array);
 		assert.equal(array.length, cellCount);
 	}
+	assert.equal(first.maxPerCell, 50);
 	assert.ok(first.cells.waterFill.every((fill) => fill >= 0 && fill <= 1));
 	const posted = harness.transfers.at(-1);
-	assert.deepEqual(posted, [first.cells.waterFill.buffer, first.cells.nutrientFill.buffer]);
+	assert.deepEqual(posted, [first.cells.waterFill.buffer, first.cells.nutrientFill.buffer, first.cells.count.buffer]);
 
 	harness.controller.handle({ type: "step", ticks: 30 });
 	const later = harness.last("snapshot");
@@ -308,4 +309,18 @@ test("a snapshot's cell arrays survive a real transfer to another thread's copy"
 	const received = structuredClone(harness.last("snapshot"), { transfer: harness.transfers.at(-1) });
 	assert.deepEqual(Array.from(received.cells.nutrientFill), expected);
 	assert.equal(cells.nutrientFill.length, 0, "the sender's buffer is detached after the transfer");
+});
+
+test("each snapshot's organism counts per cell match the summary and stay on land", () => {
+	const harness = createHarness();
+	harness.controller.handle({ type: "configure", params: { ...PARAMS, founders: 200 } });
+	const world = worldFor(PARAMS.seed);
+	for (const ticks of [0, 30]) {
+		harness.controller.handle({ type: "step", ticks });
+		const { cells, summary } = harness.last("snapshot");
+		assert.equal(cells.count.reduce((total, count) => total + count, 0), summary.count);
+		assert.equal(cells.count.filter((count) => count > 0).length, summary.occupiedCells);
+		world.cells.forEach((cell) => cell.biome === "Water" && assert.equal(cells.count[cell.id], 0));
+		assert.ok(cells.count.every((count) => count <= 50));
+	}
 });

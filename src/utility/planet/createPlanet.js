@@ -5,6 +5,7 @@ import { computeCellColors } from "./cellViews.js";
 import { createGlobeMap } from "./createGlobeMap.js";
 import { addLighting } from "./lighting.js";
 import { buildCellMeshData, buildPlanetMeshData, paintCellColors } from "./planetMeshData.js";
+import { getMarkerSize, MAX_MARKERS } from "./populationMarkers.js";
 import { createRandomSeed } from "./seededRandom.js";
 
 const up = new THREE.Vector3(0, 1, 0);
@@ -57,12 +58,16 @@ export async function createPlanet({
 	const meshData = buildPlanetMeshData(globe);
 	const surface = addGlobeSurface(scene, buildCellMeshData(globe), meshData.edgePositions);
 	const trees = addTrees(scene, meshData, gltf.scene);
+	const markers = addMarkers(scene, globe);
 	surface.setCellColors(computeCellColors("biome", { world: globe }));
 
 	addLighting(scene, camera);
 
-	renderer.setAnimationLoop(() => {
+	let lastFrame = null;
+	renderer.setAnimationLoop((time) => {
 		controls.update();
+		markers.animate(lastFrame === null ? 0 : (time - lastFrame) / 1000);
+		lastFrame = time;
 		renderer.render(scene, camera);
 	});
 
@@ -77,6 +82,9 @@ export async function createPlanet({
 		// Colours each cell from three sRGB floats per cell id (see `computeCellColors`).
 		setCellColors: surface.setCellColors,
 		setTreesVisible: (visible) => (trees.visible = visible),
+		// Shows one marker per `{ cellId }` sized for `unit` organisms (see `placeMarkers`); markers glide to their new cells.
+		setMarkers: markers.set,
+		setMarkersVisible: (visible) => (markers.mesh.visible = visible),
 	};
 }
 
@@ -119,4 +127,71 @@ function addTrees(scene, meshData, treeModel) {
 	}
 	scene.add(trees);
 	return trees;
+}
+
+const MARKER_LIFT = 0.5; // a marker sits half a radius above the surface
+const MARKER_GLIDE_SECONDS = 0.25; // time constant for a marker moving to its new cell
+
+// Instanced spheres marking groups of organisms. Each marker keeps a direction, a height, and a radius that ease toward their targets.
+function addMarkers(scene, globe) {
+	const mesh = new THREE.InstancedMesh(
+		new THREE.IcosahedronGeometry(1, 1),
+		new THREE.MeshLambertMaterial({ color: 0xff5fa2, emissive: 0x4a1030 }),
+		MAX_MARKERS
+	);
+	mesh.count = 0;
+	mesh.frustumCulled = false; // the instances move, so the base geometry's bounds do not apply
+	scene.add(mesh);
+
+	const targets = [];
+	const current = [];
+	const matrix = new THREE.Matrix4();
+	const direction = new THREE.Vector3();
+
+	function write() {
+		current.forEach(({ direction: [x, y, z], height, radius }, index) => {
+			direction.set(x, y, z).normalize();
+			matrix.makeScale(radius, radius, radius).setPosition(direction.multiplyScalar(height));
+			mesh.setMatrixAt(index, matrix);
+		});
+		mesh.count = current.length;
+		mesh.instanceMatrix.needsUpdate = true;
+	}
+
+	return {
+		mesh,
+		set(markerCells, unit) {
+			const radius = getMarkerSize(unit) * globe.radius;
+			targets.length = 0;
+			for (const { cellId } of markerCells) {
+				const cell = globe.cells[cellId];
+				targets.push({ direction: [...cell.center], height: globe.radius + cell.surfaceElevation + radius * MARKER_LIFT, radius });
+			}
+			current.length = Math.min(current.length, targets.length);
+			targets.forEach((target, index) => {
+				current[index] ??= { ...target, direction: [...target.direction] };
+			});
+			write();
+		},
+		// Eases each marker toward its target over about MARKER_GLIDE_SECONDS, redrawing only while something moves.
+		animate(seconds) {
+			if (seconds <= 0) return;
+			const share = 1 - Math.exp(-seconds / MARKER_GLIDE_SECONDS);
+			let moving = false;
+			current.forEach((marker, index) => {
+				const target = targets[index];
+				for (let axis = 0; axis < 3; axis++) {
+					const step = (target.direction[axis] - marker.direction[axis]) * share;
+					marker.direction[axis] += step;
+					moving ||= Math.abs(step) > 1e-6;
+				}
+				const heightStep = (target.height - marker.height) * share;
+				const radiusStep = (target.radius - marker.radius) * share;
+				marker.height += heightStep;
+				marker.radius += radiusStep;
+				moving ||= Math.abs(heightStep) > 1e-5 || Math.abs(radiusStep) > 1e-5;
+			});
+			if (moving) write();
+		},
+	};
 }

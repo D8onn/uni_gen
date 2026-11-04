@@ -1,6 +1,6 @@
 // Headless driver that owns one habitat and population on a world it is given; the worker runs it and the tests call it directly.
 import { createHabitat, getResourceFill } from "./habitat.js";
-import { createPopulation, EVOLVING_PRODUCER, getPopulationSummary, stepPopulation } from "./population.js";
+import { createPopulation, EVOLVING_PRODUCER, getCellCounts, getPopulationSummary, stepPopulation } from "./population.js";
 import { worldFromSimulationInput } from "./simulationInput.js";
 import { validateSimulationParams } from "./simulationParams.js";
 
@@ -49,7 +49,12 @@ export function createSimulation() {
 			return {
 				params: { ...params },
 				summary: getPopulationSummary(population),
-				cells: { waterFill: getResourceFill(habitat, "water"), nutrientFill: getResourceFill(habitat, "nutrients") },
+				maxPerCell: population.species.maxPerCell,
+				cells: {
+					waterFill: getResourceFill(habitat, "water"),
+					nutrientFill: getResourceFill(habitat, "nutrients"),
+					count: getCellCounts(population),
+				},
 			};
 		},
 	};
