@@ -6,11 +6,30 @@ import {
 	createPopulation,
 	DEATH_CAUSES,
 	DEFAULT_PRODUCER,
+	getCellCounts,
 	getCellOrganisms,
 	getPopulationSummary,
 	stepPopulation,
 } from "../src/utility/ecology/population.js";
 import { createGlobeMap } from "../src/utility/planet/createGlobeMap.js";
+
+test("cell counts tally the organisms in each cell, indexed by cell id, and follow the population", () => {
+	const world = createGlobeMap({ poleToPoleCells: 20, seed: 4 });
+	const habitat = createHabitat(world);
+	const population = createPopulation(world, { seed: 2, initialCount: 200 });
+	for (const ticks of [0, 25]) {
+		stepPopulation(population, habitat, ticks);
+		const counts = getCellCounts(population);
+		assert.ok(counts instanceof Uint32Array);
+		assert.equal(counts.length, world.cells.length);
+		assert.equal(counts.reduce((total, count) => total + count, 0), population.organisms.length);
+		for (const cell of world.cells) {
+			assert.equal(counts[cell.id], getCellOrganisms(population, cell.id).length, `cell ${cell.id}`);
+			if (cell.biome === "Water") assert.equal(counts[cell.id], 0);
+		}
+	}
+	assert.equal(getCellCounts(createPopulation(world, { seed: 1 })).every((count) => count === 0), true);
+});
 
 // Lifecycle rules without randomness: no background deaths and no reproduction.
 const QUIET = { mortalityChance: 0, reproductionChance: 0 };

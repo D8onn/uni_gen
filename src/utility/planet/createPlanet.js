@@ -5,6 +5,8 @@ import { computeCellColors } from "./cellViews.js";
 import { createGlobeMap } from "./createGlobeMap.js";
 import { addLighting } from "./lighting.js";
 import { buildCellMeshData, buildPlanetMeshData, paintCellColors } from "./planetMeshData.js";
+import { createMarkerAnimator } from "./markerAnimation.js";
+import { getMarkerSize, MAX_MARKERS } from "./populationMarkers.js";
 import { createRandomSeed } from "./seededRandom.js";
 
 const up = new THREE.Vector3(0, 1, 0);
@@ -57,12 +59,16 @@ export async function createPlanet({
 	const meshData = buildPlanetMeshData(globe);
 	const surface = addGlobeSurface(scene, buildCellMeshData(globe), meshData.edgePositions);
 	const trees = addTrees(scene, meshData, gltf.scene);
+	const markers = addMarkers(scene, globe);
 	surface.setCellColors(computeCellColors("biome", { world: globe }));
 
 	addLighting(scene, camera);
 
-	renderer.setAnimationLoop(() => {
+	let lastFrame = null;
+	renderer.setAnimationLoop((time) => {
 		controls.update();
+		markers.animate(lastFrame === null ? 0 : (time - lastFrame) / 1000);
+		lastFrame = time;
 		renderer.render(scene, camera);
 	});
 
@@ -77,6 +83,9 @@ export async function createPlanet({
 		// Colours each cell from three sRGB floats per cell id (see `computeCellColors`).
 		setCellColors: surface.setCellColors,
 		setTreesVisible: (visible) => (trees.visible = visible),
+		// Shows one marker per `{ cellId }` sized for `unit` organisms (see `placeMarkers`); markers glide to their new cells.
+		setMarkers: markers.set,
+		setMarkersVisible: (visible) => (markers.mesh.visible = visible),
 	};
 }
 
@@ -119,4 +128,50 @@ function addTrees(scene, meshData, treeModel) {
 	}
 	scene.add(trees);
 	return trees;
+}
+
+const MARKER_LIFT = 0.5; // a marker sits half a radius above the surface
+
+// Instanced spheres marking groups of organisms; `createMarkerAnimator` decides where each one is drawn.
+function addMarkers(scene, globe) {
+	const capacity = MAX_MARKERS * 2; // markers still shrinking into their neighbours count too
+	const mesh = new THREE.InstancedMesh(
+		new THREE.IcosahedronGeometry(1, 1),
+		new THREE.MeshLambertMaterial({ color: 0xff5fa2, emissive: 0x4a1030 }),
+		capacity
+	);
+	mesh.count = 0;
+	mesh.frustumCulled = false; // the instances move, so the base geometry's bounds do not apply
+	scene.add(mesh);
+
+	const animator = createMarkerAnimator({ maxMarkers: capacity });
+	const matrix = new THREE.Matrix4();
+	const direction = new THREE.Vector3();
+
+	function write() {
+		animator.markers.forEach(({ direction: [x, y, z], height, radius }, index) => {
+			direction.set(x, y, z).normalize();
+			matrix.makeScale(radius, radius, radius).setPosition(direction.multiplyScalar(height));
+			mesh.setMatrixAt(index, matrix);
+		});
+		mesh.count = animator.markers.length;
+		mesh.instanceMatrix.needsUpdate = true;
+	}
+
+	return {
+		mesh,
+		set(markerCells, unit) {
+			const radius = getMarkerSize(unit) * globe.radius;
+			animator.set(
+				markerCells.map(({ cellId }) => {
+					const cell = globe.cells[cellId];
+					return { direction: [...cell.center], height: globe.radius + cell.surfaceElevation + radius * MARKER_LIFT, radius };
+				})
+			);
+			write();
+		},
+		animate(seconds) {
+			if (animator.step(seconds)) write();
+		},
+	};
 }

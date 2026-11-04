@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import * as THREE from "three";
 import { createHabitat, getResourceFill } from "../src/utility/ecology/habitat.js";
+import { createPopulation, getCellCounts } from "../src/utility/ecology/population.js";
 import { CELL_VIEWS, computeCellColors, getViewLegend, isLiveView } from "../src/utility/planet/cellViews.js";
 import { createGlobeMap } from "../src/utility/planet/createGlobeMap.js";
 import { getSurfaceType, SURFACE_COLORS } from "../src/utility/planet/planetMeshData.js";
@@ -16,7 +17,7 @@ const near = (actual, expected, message) => {
 const rgb = (hex) => [(hex >> 16) / 255, ((hex >> 8) & 255) / 255, (hex & 255) / 255];
 
 test("the views are the biome view plus each habitat field, with a legend for every field", () => {
-	assert.deepEqual(CELL_VIEWS.map(({ id }) => id), ["biome", "temperature", "moisture", "light", "waterFill", "nutrientFill"]);
+	assert.deepEqual(CELL_VIEWS.map(({ id }) => id), ["biome", "temperature", "moisture", "light", "waterFill", "nutrientFill", "density"]);
 	assert.equal(getViewLegend("biome"), null);
 	for (const { id } of CELL_VIEWS.slice(1)) {
 		const legend = getViewLegend(id);
@@ -24,7 +25,7 @@ test("the views are the biome view plus each habitat field, with a legend for ev
 		assert.match(legend.low, /^0 /);
 		assert.match(legend.high, /^1 /);
 	}
-	assert.deepEqual(CELL_VIEWS.filter(({ id }) => isLiveView(id)).map(({ id }) => id), ["waterFill", "nutrientFill"]);
+	assert.deepEqual(CELL_VIEWS.filter(({ id }) => isLiveView(id)).map(({ id }) => id), ["waterFill", "nutrientFill", "density"]);
 	assert.throws(() => getViewLegend("humidity"), RangeError);
 	assert.throws(() => computeCellColors("humidity", { world }), RangeError);
 });
@@ -60,12 +61,19 @@ test("values outside 0-1 clamp to the ramp ends and a missing value reads as 0",
 
 test("every habitat view on a real world colours cells by their value, deterministically", () => {
 	const habitat = createHabitat(world);
-	const cells = { waterFill: getResourceFill(habitat, "water"), nutrientFill: getResourceFill(habitat, "nutrients") };
-	for (const { id } of CELL_VIEWS.slice(1)) {
-		const colors = computeCellColors(id, { world, conditions: habitat.conditions, cells });
+	const population = createPopulation(world, { seed: 1, initialCount: 150 });
+	const cells = {
+		waterFill: getResourceFill(habitat, "water"),
+		nutrientFill: getResourceFill(habitat, "nutrients"),
+		count: getCellCounts(population),
+	};
+	const maxPerCell = population.species.maxPerCell;
+	for (const view of CELL_VIEWS.slice(1)) {
+		const inputs = { world, conditions: habitat.conditions, cells, maxPerCell };
+		const colors = computeCellColors(view.id, inputs);
 		assert.equal(colors.length, cellCount * 3);
-		assert.deepEqual(computeCellColors(id, { world, conditions: habitat.conditions, cells }), colors);
-		const values = habitat.conditions[id] ?? cells[id];
+		assert.deepEqual(computeCellColors(view.id, inputs), colors);
+		const values = habitat.conditions[view.id] ?? cells[view.key ?? view.id];
 		// Cells with equal values share a colour and cells with different values differ.
 		const byValue = new Map();
 		values.forEach((value, cellId) => {
@@ -73,8 +81,8 @@ test("every habitat view on a real world colours cells by their value, determini
 			if (byValue.has(value)) assert.equal(byValue.get(value), key);
 			byValue.set(value, key);
 		});
-		// Fixed conditions vary across a world; stocks all start full, so only they may share one colour.
-		if (id in habitat.conditions) assert.ok(new Set(byValue.values()).size > 1, id);
+		// Fixed conditions and the organism count vary across a world; stocks all start full, so only they may share one colour.
+		if (view.id in habitat.conditions || view.id === "density") assert.ok(new Set(byValue.values()).size > 1, view.id);
 	}
 	const lowest = habitat.conditions.temperature.indexOf(Math.min(...habitat.conditions.temperature));
 	const highest = habitat.conditions.temperature.indexOf(Math.max(...habitat.conditions.temperature));
@@ -88,6 +96,21 @@ test("a view that needs data it was not given reports a RangeError", () => {
 	assert.throws(() => computeCellColors("waterFill", { world, conditions: habitat.conditions }), /water stock view needs one value per cell/);
 	assert.throws(() => computeCellColors("nutrientFill", { world, cells: { nutrientFill: [0.5] } }), RangeError);
 	assert.throws(() => computeCellColors("temperature", { world }), RangeError);
+	assert.throws(() => computeCellColors("density", { world, cells: { count: new Uint32Array(cellCount) } }), /needs a positive maxPerCell/);
+	assert.throws(() => computeCellColors("density", { world, maxPerCell: 50 }), /needs one value per cell/);
+});
+
+test("the density view runs from an empty cell to a full one on a square-root scale", () => {
+	const fake = { cells: Array.from({ length: 4 }, () => ({})) };
+	const stops = getViewLegend("density").stops.map((stop) => rgb(Number.parseInt(stop.slice(1), 16)));
+	const colors = computeCellColors("density", { world: fake, cells: { count: Uint32Array.of(0, 1, 50, 200) }, maxPerCell: 50 });
+	near(colorOf(colors, 0), stops[0], "empty");
+	near(colorOf(colors, 2), stops.at(-1), "at the cap");
+	near(colorOf(colors, 3), stops.at(-1), "above the cap clamps");
+	// 12 of 48 is a quarter of the cap, so the square root is a half: half way between the second and third of four stops.
+	const quarter = computeCellColors("density", { world: fake, cells: { count: Uint32Array.of(0, 12, 0, 0) }, maxPerCell: 48 });
+	near(colorOf(quarter, 1), stops[1].map((value, channel) => (value + stops[2][channel]) / 2), "a quarter of the cap");
+	assert.notDeepEqual(colorOf(colors, 1), colorOf(colors, 0), "one organism is visible against an empty cell");
 });
 
 test("resource views change as stocks are consumed", () => {

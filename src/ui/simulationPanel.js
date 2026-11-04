@@ -30,7 +30,8 @@ function sum(values) {
 
 /**
  * Adds the panel to the page. `params` are the settings the simulation was started with, and `views`
- * is a view controller (`list` of views; `select(id)` applies one and returns its legend).
+ * is a view controller (`list` of views; `select(id)` applies one and returns its legend; the organism markers
+ * can be shown or hidden, and their size is reported through `onMarkers`).
  * Apply restarts the simulation with the entered settings; changing the seed reloads the page
  * because the globe is built for one seed. Reset restarts with the last applied settings.
  */
@@ -73,6 +74,13 @@ export function createSimulationPanel({ client, params, views }) {
 	}
 	viewSelect.addEventListener("change", () => showLegend(views.select(viewSelect.value)));
 
+	const markerToggle = element("input", { type: "checkbox", checked: true });
+	const markerNote = element("span", { style: "opacity: 0.8;" });
+	markerToggle.addEventListener("change", () => views.setMarkersVisible(markerToggle.checked));
+	views.onMarkers(({ unit, shown, organisms }) => {
+		markerNote.textContent = organisms === 0 ? "none" : `${shown} \u00d7 ${unit}`;
+	});
+
 	const form = element("form", { noValidate: true }, [
 		...fields,
 		rows(playButton, stepButton),
@@ -84,6 +92,7 @@ export function createSimulationPanel({ client, params, views }) {
 		element("strong", { text: "Simulation", style: "display: block; margin-bottom: 8px;" }),
 		element("label", { style: FIELD_STYLE }, [element("span", { text: "View" }), viewSelect]),
 		legend,
+		element("label", { style: FIELD_STYLE }, [element("span", { text: "Organisms" }), element("span", {}, [markerNote, " ", markerToggle])]),
 		form,
 	]);
 	document.body.appendChild(panel);

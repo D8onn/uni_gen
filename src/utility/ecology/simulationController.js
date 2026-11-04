@@ -9,7 +9,7 @@ const RATE_WINDOW_MS = 1000;
 
 /**
  * Handles `world` {input}, `configure` {params}, `reset`, `play`, `pause`, `step` {ticks}, and `speed` {ticksPerSecond} messages.
- * Every outcome is posted back as `snapshot` {params, running, ticksPerSecond, summary, cells} or `error` {message}; `cells` holds per-cell typed arrays indexed by cell id.
+ * Every outcome is posted back as `snapshot` {params, running, ticksPerSecond, summary, maxPerCell, cells} or `error` {message}; `cells` holds per-cell typed arrays indexed by cell id.
  * `post(message, transferList)` receives the buffers to transfer. `now`, `schedule`, and `cancel` are injectable so tests can drive the clock.
  */
 export function createSimulationController({
@@ -32,9 +32,9 @@ export function createSimulationController({
 
 	function postSnapshot() {
 		lastPost = now();
-		const { params, summary, cells } = simulation.snapshot();
+		const { params, summary, maxPerCell, cells } = simulation.snapshot();
 		// The per-cell arrays are fresh copies, so their buffers move to the page without copying.
-		post({ type: "snapshot", params: { ...params, speed }, running, ticksPerSecond, summary, cells }, Object.values(cells).map((array) => array.buffer));
+		post({ type: "snapshot", params: { ...params, speed }, running, ticksPerSecond, summary, maxPerCell, cells }, Object.values(cells).map((array) => array.buffer));
 	}
 
 	function stop() {
