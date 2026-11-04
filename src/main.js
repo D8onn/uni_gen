@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import WebGL from "three/addons/capabilities/WebGL.js";
+import { createCellInspector } from "./ui/cellInspector.js";
 import { createSimulationPanel } from "./ui/simulationPanel.js";
 import { createViewController } from "./ui/viewController.js";
 import { createPlanet } from "./utility/";
@@ -50,6 +51,7 @@ async function createWorldFromUrl() {
 	client.setWorld(extractSimulationInput(planet.world));
 	client.configure(params);
 	createSimulationPanel({ client, params, views: createViewController({ planet, client }) });
+	createCellInspector({ planet, client });
 	return planet;
 }
 

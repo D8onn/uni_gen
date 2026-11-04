@@ -1,11 +1,12 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { createControls, createRenderer } from "../sceneHelpers.js";
+import { createClickDetector, getCellOfTriangle } from "./cellPicking.js";
 import { computeCellColors } from "./cellViews.js";
 import { createGlobeMap } from "./createGlobeMap.js";
 import { addLighting } from "./lighting.js";
-import { buildCellMeshData, buildPlanetMeshData, paintCellColors } from "./planetMeshData.js";
 import { createMarkerAnimator } from "./markerAnimation.js";
+import { buildCellMeshData, buildCellOutline, buildPlanetMeshData, paintCellColors } from "./planetMeshData.js";
 import { getMarkerSize, MAX_MARKERS } from "./populationMarkers.js";
 import { createRandomSeed } from "./seededRandom.js";
 
@@ -57,9 +58,12 @@ export async function createPlanet({
 	});
 	gltf.scene.scale.set(0.1, 0.16, 0.1);
 	const meshData = buildPlanetMeshData(globe);
-	const surface = addGlobeSurface(scene, buildCellMeshData(globe), meshData.edgePositions);
+	const cellMesh = buildCellMeshData(globe);
+	const surface = addGlobeSurface(scene, cellMesh, meshData.edgePositions);
 	const trees = addTrees(scene, meshData, gltf.scene);
 	const markers = addMarkers(scene, globe);
+	const selection = addSelection(scene, globe, cellMesh);
+	const clicks = addCellClicks({ renderer, camera, terrain: surface.mesh, cellVertexStart: cellMesh.cellVertexStart });
 	surface.setCellColors(computeCellColors("biome", { world: globe }));
 
 	addLighting(scene, camera);
@@ -86,6 +90,10 @@ export async function createPlanet({
 		// Shows one marker per `{ cellId }` sized for `unit` organisms (see `placeMarkers`); markers glide to their new cells.
 		setMarkers: markers.set,
 		setMarkersVisible: (visible) => (markers.mesh.visible = visible),
+		// Calls `listener(cellId)` when the terrain is clicked, with null for a click that misses it; a drag is not a click. Returns a function that stops listening.
+		onCellClick: clicks.onClick,
+		// Outlines and tints one cell as selected; null clears it.
+		setSelectedCell: selection.set,
 	};
 }
 
@@ -96,7 +104,8 @@ function addGlobeSurface(scene, { positions, cellVertexStart }, edgePositions) {
 	colors.setUsage(THREE.DynamicDrawUsage);
 	geometry.setAttribute("color", colors);
 	geometry.computeVertexNormals();
-	scene.add(new THREE.Mesh(geometry, new THREE.MeshLambertMaterial({ vertexColors: true })));
+	const mesh = new THREE.Mesh(geometry, new THREE.MeshLambertMaterial({ vertexColors: true }));
+	scene.add(mesh);
 
 	const edgeGeometry = new THREE.BufferGeometry();
 	edgeGeometry.setAttribute(
@@ -111,6 +120,7 @@ function addGlobeSurface(scene, { positions, cellVertexStart }, edgePositions) {
 	scene.add(edges);
 
 	return {
+		mesh,
 		setCellColors(cellColors) {
 			paintCellColors(colors.array, cellVertexStart, cellColors);
 			colors.needsUpdate = true;
@@ -128,6 +138,63 @@ function addTrees(scene, meshData, treeModel) {
 	}
 	scene.add(trees);
 	return trees;
+}
+
+const SELECTION_LIFT = 1.003; // the selection's tint floats just above the surface, and its outline a little higher
+
+// A translucent tint and an outline on the selected cell.
+function addSelection(scene, globe, { positions, cellVertexStart }) {
+	const group = new THREE.Group();
+	group.visible = false;
+	const tint = new THREE.Mesh(
+		new THREE.BufferGeometry(),
+		new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.3, depthWrite: false })
+	);
+	const outline = new THREE.LineLoop(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0xffffff }));
+	tint.renderOrder = outline.renderOrder = 2;
+	group.add(tint, outline);
+	scene.add(group);
+
+	const setPositions = (object, values) => {
+		object.geometry.dispose();
+		object.geometry = new THREE.BufferGeometry();
+		object.geometry.setAttribute("position", new THREE.BufferAttribute(values, 3));
+	};
+	return {
+		set(cellId) {
+			group.visible = cellId !== null;
+			if (cellId === null) return;
+			const raised = positions.slice(cellVertexStart[cellId] * 3, cellVertexStart[cellId + 1] * 3).map((value) => value * SELECTION_LIFT);
+			setPositions(tint, raised);
+			setPositions(outline, buildCellOutline(globe, cellId));
+		},
+	};
+}
+
+// Reports which cell a click on the terrain lands on, using the cell mesh's vertex ranges to name the triangle's cell.
+function addCellClicks({ renderer, camera, terrain, cellVertexStart }) {
+	const canvas = renderer.domElement;
+	const raycaster = new THREE.Raycaster();
+	const pointer = new THREE.Vector2();
+	const detector = createClickDetector();
+	const listeners = new Set();
+	canvas.addEventListener("pointerdown", (event) => detector.down({ x: event.clientX, y: event.clientY, button: event.button }));
+	canvas.addEventListener("pointercancel", () => detector.cancel());
+	canvas.addEventListener("pointerup", (event) => {
+		if (!detector.up({ x: event.clientX, y: event.clientY, button: event.button })) return;
+		const bounds = canvas.getBoundingClientRect();
+		pointer.set(((event.clientX - bounds.left) / bounds.width) * 2 - 1, -((event.clientY - bounds.top) / bounds.height) * 2 + 1);
+		raycaster.setFromCamera(pointer, camera);
+		const [hit] = raycaster.intersectObject(terrain, false);
+		const cellId = hit ? getCellOfTriangle(cellVertexStart, hit.faceIndex) : null;
+		for (const listener of listeners) listener(cellId);
+	});
+	return {
+		onClick(listener) {
+			listeners.add(listener);
+			return () => listeners.delete(listener);
+		},
+	};
 }
 
 const MARKER_LIFT = 0.5; // a marker sits half a radius above the surface

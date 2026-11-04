@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createHabitat } from "../src/utility/ecology/habitat.js";
-import { createPopulation, getPopulationSummary, stepPopulation } from "../src/utility/ecology/population.js";
+import { createHabitat, getCellHabitat } from "../src/utility/ecology/habitat.js";
+import { createPopulation, getCellOrganisms, getPopulationSummary, stepPopulation } from "../src/utility/ecology/population.js";
 import { createSimulation, SPECIES_PRESETS } from "../src/utility/ecology/simulation.js";
 import { createSimulationController } from "../src/utility/ecology/simulationController.js";
 import { extractSimulationInput, worldFromSimulationInput } from "../src/utility/ecology/simulationInput.js";
@@ -323,4 +323,92 @@ test("each snapshot's organism counts per cell match the summary and stay on lan
 		world.cells.forEach((cell) => cell.biome === "Water" && assert.equal(cells.count[cell.id], 0));
 		assert.ok(cells.count.every((count) => count <= 50));
 	}
+});
+
+test("inspecting a cell gives exactly what the habitat and population report for it, while ticks advance and cells empty", () => {
+	const world = worldFor(PARAMS.seed);
+	const species = { ...SPECIES_PRESETS.evolving, dispersalChance: PARAMS.dispersal };
+	const habitat = createHabitat(world);
+	const population = createPopulation(world, { seed: PARAMS.seed, initialCount: PARAMS.founders, species });
+	const simulation = createLoadedSimulation();
+	simulation.configure(PARAMS);
+	const watched = [...new Set(population.organisms.map(({ cellId }) => cellId))].slice(0, 12);
+	assert.ok(watched.length >= 6);
+	let emptied = 0;
+	for (let tick = 0; tick <= 40; tick++) {
+		if (tick > 0) {
+			stepPopulation(population, habitat, 1);
+			simulation.step(1);
+		}
+		for (const cellId of [...watched, 0, world.cells.length - 1]) {
+			const expected = { cellId, tick, ...getCellHabitat(habitat, cellId), organisms: getCellOrganisms(population, cellId) };
+			assert.deepEqual(simulation.inspectCell(cellId), expected, `cell ${cellId} at tick ${tick}`);
+		}
+		emptied += watched.filter((cellId) => getCellOrganisms(population, cellId).length === 0).length > 0 ? 1 : 0;
+	}
+	assert.ok(emptied > 0, "the run never emptied a watched cell, so it does not exercise that case");
+	assert.throws(() => simulation.inspectCell(-1), RangeError);
+	assert.throws(() => simulation.inspectCell(world.cells.length), RangeError);
+	assert.throws(() => simulation.inspectCell(1.5), RangeError);
+	assert.throws(() => createSimulation().inspectCell(0), /not been configured/);
+});
+
+test("the controller follows a watched cell with a cell message after every snapshot", () => {
+	const harness = createHarness();
+	harness.controller.handle({ type: "configure", params: { ...PARAMS, speed: 20 } });
+	const habitatMessages = () => harness.messages.filter((message) => message.type === "cell");
+	assert.equal(habitatMessages().length, 0, "nothing is sent until a cell is inspected");
+
+	const occupied = harness.last("snapshot").cells.count.findIndex((count) => count > 0);
+	harness.controller.handle({ type: "inspect", cellId: occupied });
+	const first = harness.last("cell");
+	assert.equal(first.cellId, occupied);
+	assert.equal(first.tick, 0);
+	assert.equal(first.organisms.length, harness.last("snapshot").cells.count[occupied]);
+	assert.equal(harness.messages.at(-1), first, "the cell message follows its snapshot");
+
+	harness.controller.handle({ type: "play" });
+	harness.advance(500);
+	harness.advance(500);
+	harness.controller.handle({ type: "pause" });
+	assert.ok(habitatMessages().length > 3, "every snapshot is followed by the cell");
+	const snapshots = harness.messages.filter((message) => message.type === "snapshot" || message.type === "cell");
+	snapshots.forEach((message, index) => {
+		if (message.type === "cell") {
+			const snapshot = snapshots[index - 1];
+			assert.equal(snapshot.type, "snapshot");
+			assert.equal(message.tick, snapshot.summary.tick, "the cell and the stats are from the same tick");
+			assert.equal(message.organisms.length, snapshot.cells.count[occupied]);
+		}
+	});
+	assert.equal(harness.last("cell").tick, 20);
+
+	harness.controller.handle({ type: "inspect", cellId: null });
+	const seen = habitatMessages().length;
+	harness.controller.handle({ type: "step", ticks: 2 });
+	assert.equal(habitatMessages().length, seen, "stopping the inspection stops the messages");
+});
+
+test("an invalid inspection is reported, and the previous cell stays watched", () => {
+	const harness = createHarness();
+	harness.controller.handle({ type: "inspect", cellId: 3 });
+	assert.match(harness.last("error").message, /not been configured/);
+	harness.controller.handle({ type: "configure", params: PARAMS });
+	harness.controller.handle({ type: "inspect", cellId: 3 });
+	harness.controller.handle({ type: "inspect", cellId: 999999 });
+	assert.match(harness.last("error").message, /Unknown cell id/);
+	harness.controller.handle({ type: "step", ticks: 1 });
+	assert.equal(harness.last("cell").cellId, 3);
+	assert.equal(harness.last("cell").tick, 1);
+});
+
+test("loading a new world stops the inspection", () => {
+	const harness = createHarness();
+	harness.controller.handle({ type: "configure", params: PARAMS });
+	harness.controller.handle({ type: "inspect", cellId: 3 });
+	harness.controller.handle({ type: "world", input: inputFor(8) });
+	harness.controller.handle({ type: "configure", params: { ...PARAMS, seed: 8 } });
+	const before = harness.messages.filter((message) => message.type === "cell").length;
+	harness.controller.handle({ type: "step", ticks: 1 });
+	assert.equal(harness.messages.filter((message) => message.type === "cell").length, before);
 });
