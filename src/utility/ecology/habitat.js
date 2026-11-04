@@ -96,6 +96,13 @@ function stepResource(habitat, resource) {
 	});
 }
 
+// Each cell's stock as a fraction of its capacity (0 where the capacity is 0), indexed by cell id.
+export function getResourceFill(habitat, resource) {
+	checkResource(resource);
+	const { capacity, resources } = habitat;
+	return Float32Array.from(resources[resource], (stock, id) => (capacity[resource][id] > 0 ? stock / capacity[resource][id] : 0));
+}
+
 export function stepHabitat(habitat, ticks = 1) {
 	if (!Number.isInteger(ticks) || ticks < 0) {
 		throw new RangeError("ticks must be a non-negative integer.");

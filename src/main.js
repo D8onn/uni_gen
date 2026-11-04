@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import WebGL from "three/addons/capabilities/WebGL.js";
 import { createSimulationPanel } from "./ui/simulationPanel.js";
+import { createViewController } from "./ui/viewController.js";
 import { createPlanet } from "./utility/";
 import { createSimulationClient } from "./utility/ecology/simulationClient.js";
 import { extractSimulationInput } from "./utility/ecology/simulationInput.js";
@@ -48,7 +49,7 @@ async function createWorldFromUrl() {
 	const planet = await createPlanet({ poleToPoleCells: 80, seed: params.seed });
 	client.setWorld(extractSimulationInput(planet.world));
 	client.configure(params);
-	createSimulationPanel({ client, params });
+	createSimulationPanel({ client, params, views: createViewController({ planet, client }) });
 	return planet;
 }
 

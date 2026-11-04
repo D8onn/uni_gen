@@ -6,6 +6,7 @@ import {
 	createHabitat,
 	DEFAULT_RESOURCE_RATES,
 	getCellHabitat,
+	getResourceFill,
 	RESOURCES,
 	stepHabitat,
 } from "../src/utility/ecology/habitat.js";
@@ -205,6 +206,19 @@ test("stepping is deterministic and does not depend on cell order", () => {
 			assert.ok(Math.abs(difference) < 1e-12, `${resource} ${id}`);
 		}
 	}
+});
+
+test("resource fill is the stock as a fraction of capacity, and 0 where capacity is 0", () => {
+	const habitat = createHabitat(lineWorld([1, 0.5, 0]));
+	assert.deepEqual(getResourceFill(habitat, "water"), Float32Array.of(1, 1, 0));
+	consumeResource(habitat, 0, "water", 0.25);
+	consumeResource(habitat, 1, "water", 0.25);
+	assert.deepEqual(getResourceFill(habitat, "water"), Float32Array.of(0.75, 0.5, 0));
+	assert.deepEqual(getResourceFill(habitat, "nutrients"), Float32Array.of(1, 1, 0));
+	assert.throws(() => getResourceFill(habitat, "light"), RangeError);
+	const copy = getResourceFill(habitat, "water");
+	copy.fill(0);
+	assert.equal(getResourceFill(habitat, "water")[0], 0.75);
 });
 
 test("the habitat model is independent of Three.js and of rendering", () => {

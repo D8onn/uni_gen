@@ -1,5 +1,5 @@
 // Headless driver that owns one habitat and population on a world it is given; the worker runs it and the tests call it directly.
-import { createHabitat } from "./habitat.js";
+import { createHabitat, getResourceFill } from "./habitat.js";
 import { createPopulation, EVOLVING_PRODUCER, getPopulationSummary, stepPopulation } from "./population.js";
 import { worldFromSimulationInput } from "./simulationInput.js";
 import { validateSimulationParams } from "./simulationParams.js";
@@ -43,10 +43,14 @@ export function createSimulation() {
 			const { habitat, population } = requireState();
 			stepPopulation(population, habitat, ticks);
 		},
-		// Plain data safe to post to the main thread.
+		// Plain data safe to post to the main thread; `cells` holds one entry per cell id and is a fresh copy each call.
 		snapshot() {
-			const { params, population } = requireState();
-			return { params: { ...params }, summary: getPopulationSummary(population) };
+			const { params, habitat, population } = requireState();
+			return {
+				params: { ...params },
+				summary: getPopulationSummary(population),
+				cells: { waterFill: getResourceFill(habitat, "water"), nutrientFill: getResourceFill(habitat, "nutrients") },
+			};
 		},
 	};
 }

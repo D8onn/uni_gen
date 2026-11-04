@@ -172,8 +172,12 @@ function createHarness() {
 	let time = 0;
 	let pending = null;
 	const messages = [];
+	const transfers = [];
 	const controller = createSimulationController({
-		post: (message) => messages.push(message),
+		post: (message, transfer) => {
+			messages.push(message);
+			transfers.push(transfer);
+		},
 		now: () => time,
 		schedule: (callback) => (pending = callback),
 		cancel: () => (pending = null),
@@ -182,6 +186,7 @@ function createHarness() {
 	return {
 		controller,
 		messages,
+		transfers,
 		advance(ms) {
 			time += ms;
 			const callback = pending;
@@ -271,4 +276,36 @@ test("loading a new world stops playback and requires configuring again", () => 
 	harness.controller.handle({ type: "configure", params: { ...PARAMS, seed: 8 } });
 	assert.equal(harness.last("snapshot").params.seed, 8);
 	assert.equal(harness.last("snapshot").summary.tick, 0);
+});
+
+test("each snapshot carries fresh per-cell stock fills whose buffers are transferred", () => {
+	const harness = createHarness();
+	harness.controller.handle({ type: "configure", params: PARAMS });
+	const cellCount = worldFor(PARAMS.seed).cells.length;
+	const first = harness.last("snapshot");
+	assert.deepEqual(Object.keys(first.cells), ["waterFill", "nutrientFill"]);
+	for (const array of Object.values(first.cells)) {
+		assert.ok(array instanceof Float32Array);
+		assert.equal(array.length, cellCount);
+	}
+	assert.ok(first.cells.waterFill.every((fill) => fill >= 0 && fill <= 1));
+	const posted = harness.transfers.at(-1);
+	assert.deepEqual(posted, [first.cells.waterFill.buffer, first.cells.nutrientFill.buffer]);
+
+	harness.controller.handle({ type: "step", ticks: 30 });
+	const later = harness.last("snapshot");
+	assert.notEqual(later.cells.nutrientFill.buffer, first.cells.nutrientFill.buffer);
+	assert.ok(first.cells.nutrientFill.every((fill) => fill === 0 || fill === 1), "stocks start full (0 only where there is no capacity)");
+	assert.ok(later.cells.nutrientFill.some((fill, id) => fill < first.cells.nutrientFill[id]), "feeding lowers some nutrient stocks");
+	assert.ok(later.cells.waterFill.every((fill) => fill >= 0 && fill <= 1));
+});
+
+test("a snapshot's cell arrays survive a real transfer to another thread's copy", () => {
+	const harness = createHarness();
+	harness.controller.handle({ type: "configure", params: PARAMS });
+	const { cells } = harness.last("snapshot");
+	const expected = Array.from(cells.nutrientFill);
+	const received = structuredClone(harness.last("snapshot"), { transfer: harness.transfers.at(-1) });
+	assert.deepEqual(Array.from(received.cells.nutrientFill), expected);
+	assert.equal(cells.nutrientFill.length, 0, "the sender's buffer is detached after the transfer");
 });

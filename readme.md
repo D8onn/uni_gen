@@ -20,7 +20,7 @@ Each launch generates a random 32-bit seed and logs it to the browser console. A
 
 ## Running the Simulation
 
-The app runs the ecology simulation (habitat, population, traits, dispersal) in a Web Worker, so stepping never blocks rendering or orbit controls. The page builds the world once and posts the worker only what the simulation reads (the seed and each cell's biome, latitude, temperature, moisture, and neighbors; `extractSimulationInput`), so the worker always runs on the world you see. It starts paused at tick 0. Nothing is drawn on the globe yet; the panel at the top right shows tick, organism count, total biomass, occupied cells, and births and deaths (last tick and total).
+The app runs the ecology simulation (habitat, population, traits, dispersal) in a Web Worker, so stepping never blocks rendering or orbit controls. The page builds the world once and posts the worker only what the simulation reads (the seed and each cell's biome, latitude, temperature, moisture, and neighbors; `extractSimulationInput`), so the worker always runs on the world you see. It starts paused at tick 0. The panel at the top right shows tick, organism count, total biomass, occupied cells, and births and deaths (last tick and total).
 
 Settings come from the URL; a missing one takes its default, and an invalid one shows an error instead of loading the world:
 
@@ -35,6 +35,10 @@ Settings come from the URL; a missing one takes its default, and an invalid one 
 For example, `?seed=12345&founders=500&species=neutral&dispersal=0&speed=50`. The same URL reproduces the same simulation tick for tick, however fast or in whatever steps it is run.
 
 The panel mirrors these settings. **Play/Pause** and **Step** (one tick) control time. **Apply** restarts the simulation at tick 0 with the entered settings and writes them to the URL; changing the seed reloads the page because the globe is built for one seed. **Reset** restarts with the last applied settings and discards unapplied edits. Changing **Ticks/sec** takes effect immediately without a restart. Speed is a target: a tick takes about 8 ms at a few thousand organisms, so very high speeds fall behind, and the panel shows the achieved rate.
+
+### Views
+
+The **View** selector colours every cell of the globe by one habitat field, with a legend (all fields are unitless 0 to 1 indices or fill fractions): **Biome** (the default, with trees), **Temperature**, **Moisture**, **Light** (these three never change), and **Water stock** and **Nutrient stock** (a cell's stock divided by its capacity; 1 is full). The stock views update as the simulation runs, so a depleted cell turns pale where organisms have been feeding. Ocean and river cells are coloured by their value like any other cell, and trees show only in the Biome view. The worker sends the page one array per stock with an entry for each cell id in every snapshot (about 38 KB each, transferred rather than copied).
 
 ## Climate Model
 
