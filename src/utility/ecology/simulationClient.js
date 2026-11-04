@@ -26,6 +26,7 @@ export function createSimulationClient() {
 			if (replay !== null) listener(replay);
 			return () => listeners.delete(listener);
 		},
+		setWorld: (input) => worker.postMessage({ type: "world", input }),
 		configure: (params) => worker.postMessage({ type: "configure", params }),
 		reset: () => worker.postMessage({ type: "reset" }),
 		play: () => worker.postMessage({ type: "play" }),

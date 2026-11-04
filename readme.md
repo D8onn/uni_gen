@@ -20,7 +20,7 @@ Each launch generates a random 32-bit seed and logs it to the browser console. A
 
 ## Running the Simulation
 
-The app runs the ecology simulation (habitat, population, traits, dispersal) in a Web Worker, so stepping never blocks rendering or orbit controls. The worker builds its own copy of the world from the same seed and starts paused at tick 0. Nothing is drawn on the globe yet; the panel at the top right shows tick, organism count, total biomass, occupied cells, and births and deaths (last tick and total).
+The app runs the ecology simulation (habitat, population, traits, dispersal) in a Web Worker, so stepping never blocks rendering or orbit controls. The page builds the world once and posts the worker only what the simulation reads (the seed and each cell's biome, latitude, temperature, moisture, and neighbors; `extractSimulationInput`), so the worker always runs on the world you see. It starts paused at tick 0. Nothing is drawn on the globe yet; the panel at the top right shows tick, organism count, total biomass, occupied cells, and births and deaths (last tick and total).
 
 Settings come from the URL; a missing one takes its default, and an invalid one shows an error instead of loading the world:
 

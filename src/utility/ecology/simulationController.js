@@ -8,18 +8,17 @@ const SNAPSHOT_INTERVAL_MS = 100;
 const RATE_WINDOW_MS = 1000;
 
 /**
- * Handles `configure` {params}, `reset`, `play`, `pause`, `step` {ticks}, and `speed` {ticksPerSecond} messages.
+ * Handles `world` {input}, `configure` {params}, `reset`, `play`, `pause`, `step` {ticks}, and `speed` {ticksPerSecond} messages.
  * Every outcome is posted back as `snapshot` {params, running, ticksPerSecond, summary} or `error` {message}.
  * `now`, `schedule`, and `cancel` are injectable so tests can drive the clock.
  */
 export function createSimulationController({
 	post,
-	poleToPoleCells = 80,
 	now = () => performance.now(),
 	schedule = setTimeout,
 	cancel = clearTimeout,
 }) {
-	const simulation = createSimulation({ poleToPoleCells });
+	const simulation = createSimulation();
 	let configured = false;
 	let speed = 1;
 	let running = false;
@@ -80,6 +79,12 @@ export function createSimulationController({
 	}
 
 	const handlers = {
+		// Replaces the world; the simulation must then be configured again.
+		world({ input }) {
+			stop();
+			simulation.setWorld(input);
+			configured = false;
+		},
 		configure({ params }) {
 			stop();
 			simulation.configure(params);

@@ -3,6 +3,7 @@ import WebGL from "three/addons/capabilities/WebGL.js";
 import { createSimulationPanel } from "./ui/simulationPanel.js";
 import { createPlanet } from "./utility/";
 import { createSimulationClient } from "./utility/ecology/simulationClient.js";
+import { extractSimulationInput } from "./utility/ecology/simulationInput.js";
 import { parseSimulationParams } from "./utility/ecology/simulationParams.js";
 
 THREE.DefaultLoadingManager.onStart = function (url, itemsLoaded, itemsTotal) {
@@ -44,10 +45,11 @@ THREE.DefaultLoadingManager.onError = function (url) {
 async function createWorldFromUrl() {
 	const params = parseSimulationParams(window.location.search);
 	const client = createSimulationClient();
+	const planet = await createPlanet({ poleToPoleCells: 80, seed: params.seed });
+	client.setWorld(extractSimulationInput(planet.world));
 	client.configure(params);
-	const world = await createPlanet({ poleToPoleCells: 80, seed: params.seed });
 	createSimulationPanel({ client, params });
-	return world;
+	return planet;
 }
 
 if (!WebGL.isWebGL2Available()) {

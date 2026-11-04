@@ -68,6 +68,7 @@ export async function createPlanet({
 		`World seed: ${globe.seed}. Generated ${globe.cells.length} spherical cells (${globe.estimatedPoleToPoleCells.toFixed(1)} cells pole-to-pole; 12 pentagons).`
 	);
 	return {
+		world: globe,
 		seed: globe.seed,
 		cellCount: globe.cells.length,
 		estimatedPoleToPoleCells: globe.estimatedPoleToPoleCells,
