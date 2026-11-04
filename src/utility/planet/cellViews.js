@@ -8,9 +8,11 @@ const DARK_TO_BRIGHT = [0x1b1b3a, 0x8a4b1f, 0xffd24d, 0xfffbe6];
 const EMPTY_TO_FULL_WATER = [0xfff5e0, 0x9ecae1, 0x08519c];
 const EMPTY_TO_FULL_NUTRIENTS = [0xf7fcb9, 0xaddd8e, 0x31a354, 0x004529];
 const NONE_TO_CROWDED = [0x1c2733, 0x7a4fc4, 0xe0508a, 0xffd166];
+const EMPTY_CELL = 0x1c2733; // empty cells, and cells in no region, are drawn as a dark neutral
 
 // `source` names where the values come from: `conditions` never change; `cells` come from the simulation's snapshots.
 // `key` is the field to read when it differs from the id, and `scale(raw, maxPerCell)` turns it into a 0-1 value.
+// `occupiedOnly` draws cells without organisms as the neutral colour, and `categorical` colours by an integer id instead of a ramp.
 export const CELL_VIEWS = [
 	{ id: "biome", label: "Biome" },
 	{ id: "temperature", label: "Temperature", source: "conditions", ramp: COLD_TO_HOT, low: "0 cold", high: "1 hot" },
@@ -29,9 +31,31 @@ export const CELL_VIEWS = [
 		low: "0 none",
 		high: "1 cap (sqrt)",
 	},
+	{ id: "temperatureOptimum", label: "Temperature optimum", source: "cells", occupiedOnly: true, ramp: COLD_TO_HOT, low: "0 cold-adapted", high: "1 hot-adapted" },
+	{ id: "moistureOptimum", label: "Moisture optimum", source: "cells", occupiedOnly: true, ramp: DRY_TO_WET, low: "0 dry-adapted", high: "1 wet-adapted" },
+	{
+		id: "region",
+		label: "Dispersal region",
+		source: "cells",
+		occupiedOnly: true,
+		categorical: true,
+		note: "Each colour is a separate land region that organisms cannot leave; dark cells are empty.",
+	},
 ];
 
 const hexToRgb = (hex) => [(hex >> 16) / 255, ((hex >> 8) & 255) / 255, (hex & 255) / 255];
+
+// A colour for a region id: hues a golden angle apart, so neighbouring ids differ and an id always has the same colour.
+function regionColor(region) {
+	if (!(region >= 0)) return hexToRgb(EMPTY_CELL);
+	const hue = ((region * 137.508) % 360) / 60;
+	const [saturation, lightness] = [0.65, 0.55];
+	const chroma = (1 - Math.abs(2 * lightness - 1)) * saturation;
+	const x = chroma * (1 - Math.abs((hue % 2) - 1));
+	const [r, g, b] = [[chroma, x, 0], [x, chroma, 0], [0, chroma, x], [0, x, chroma], [x, 0, chroma], [chroma, 0, x]][Math.floor(hue) % 6];
+	const offset = lightness - chroma / 2;
+	return [r + offset, g + offset, b + offset];
+}
 
 // The sRGB colour at `value` (clamped to 0-1) along a ramp of evenly spaced stops.
 function sampleRamp(ramp, value) {
@@ -54,9 +78,10 @@ export function isLiveView(viewId) {
 	return getCellView(viewId).source === "cells";
 }
 
-// The legend for a view as `{ title, stops, low, high }` (stops are CSS hex colours), or null for the biome view.
+// The legend for a view: `{ title, stops, low, high }` (stops are CSS hex colours), `{ title, note }` for a view coloured by category, or null for the biome view.
 export function getViewLegend(viewId) {
 	const view = getCellView(viewId);
+	if (view.note) return { title: view.label, note: view.note };
 	if (!view.ramp) return null;
 	return {
 		title: view.label,
@@ -69,7 +94,7 @@ export function getViewLegend(viewId) {
 /**
  * Returns three sRGB floats (0-1) per cell id for a view. `conditions` is a habitat's `conditions`,
  * `cells` is a snapshot's per-cell arrays, and `maxPerCell` its organism limit per cell; each is only
- * needed by the views that read it.
+ * needed by the views that read it. Views that colour only occupied cells also need `cells.count`.
  */
 export function computeCellColors(viewId, { world, conditions, cells, maxPerCell }) {
 	const view = getCellView(viewId);
@@ -83,6 +108,15 @@ export function computeCellColors(viewId, { world, conditions, cells, maxPerCell
 		throw new RangeError(`The ${view.label.toLowerCase()} view needs one value per cell.`);
 	}
 	if (view.scale && !(maxPerCell > 0)) throw new RangeError(`The ${view.label.toLowerCase()} view needs a positive maxPerCell.`);
-	values.forEach((value, id) => colors.set(sampleRamp(view.ramp, view.scale ? view.scale(value, maxPerCell) : value), id * 3));
+	const counts = cells?.count;
+	if (view.occupiedOnly && counts?.length !== world.cells.length) throw new RangeError(`The ${view.label.toLowerCase()} view needs the organism count of every cell.`);
+	const empty = hexToRgb(EMPTY_CELL);
+	values.forEach((value, id) => {
+		let color;
+		if (view.occupiedOnly && counts[id] === 0) color = empty;
+		else if (view.categorical) color = regionColor(value);
+		else color = sampleRamp(view.ramp, view.scale ? view.scale(value, maxPerCell) : value);
+		colors.set(color, id * 3);
+	});
 	return colors;
 }

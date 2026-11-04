@@ -1,4 +1,5 @@
 // Control panel for the browser simulation: settings that mirror the URL, playback buttons, and live statistics.
+import { groupLines } from "./groupLines.js";
 import {
 	MAX_FOUNDERS,
 	MAX_SPEED,
@@ -8,7 +9,7 @@ import {
 } from "../utility/ecology/simulationParams.js";
 
 const PANEL_STYLE = `
-	position: fixed; top: 12px; right: 12px; width: 240px; padding: 12px; box-sizing: border-box;
+	position: fixed; top: 12px; right: 12px; width: 240px; max-height: calc(100vh - 24px); overflow-y: auto; padding: 12px; box-sizing: border-box;
 	font: 12px/1.4 monospace; color: #dfeaf2; background: rgba(7, 17, 26, 0.85);
 	border: 1px solid #2c4258; border-radius: 6px;
 `;
@@ -65,6 +66,10 @@ export function createSimulationPanel({ client, params, views }) {
 	function showLegend(viewLegend) {
 		legend.replaceChildren();
 		if (!viewLegend) return;
+		if (viewLegend.note) {
+			legend.append(element("div", { text: viewLegend.title }), element("div", { text: viewLegend.note, style: "opacity: 0.8;" }));
+			return;
+		}
 		const bar = element("div", { style: `height: 10px; border-radius: 2px; background: linear-gradient(to right, ${viewLegend.stops.join(", ")});` });
 		const ends = element("div", { style: "display: flex; justify-content: space-between;" }, [
 			element("span", { text: viewLegend.low }),
@@ -152,7 +157,7 @@ export function createSimulationPanel({ client, params, views }) {
 		})
 	);
 
-	function render({ running: isRunning, ticksPerSecond, summary }) {
+	function render({ running: isRunning, ticksPerSecond, summary, groups }) {
 		running = isRunning;
 		playButton.textContent = running ? "Pause" : "Play";
 		const { lastTick, totals } = summary;
@@ -163,6 +168,7 @@ export function createSimulationPanel({ client, params, views }) {
 			`Cells       ${summary.occupiedCells}`,
 			`Births      ${lastTick.births} (total ${totals.births})`,
 			`Deaths      ${sum(lastTick.deaths)} (total ${sum(totals.deaths)})`,
+			...groupLines(groups),
 		].join("\n");
 	}
 

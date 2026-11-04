@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createHabitat, getCellHabitat } from "../src/utility/ecology/habitat.js";
-import { createPopulation, getCellOrganisms, getPopulationSummary, stepPopulation } from "../src/utility/ecology/population.js";
+import {
+	createPopulation,
+	getCellOrganisms,
+	getDispersalRegions,
+	getPopulationSummary,
+	stepPopulation,
+	summarizeGroups,
+	summarizeTraits,
+} from "../src/utility/ecology/population.js";
 import { createSimulation, SPECIES_PRESETS } from "../src/utility/ecology/simulation.js";
 import { createSimulationController } from "../src/utility/ecology/simulationController.js";
 import { extractSimulationInput, worldFromSimulationInput } from "../src/utility/ecology/simulationInput.js";
@@ -283,15 +291,15 @@ test("each snapshot carries fresh per-cell stock fills whose buffers are transfe
 	harness.controller.handle({ type: "configure", params: PARAMS });
 	const cellCount = worldFor(PARAMS.seed).cells.length;
 	const first = harness.last("snapshot");
-	assert.deepEqual(Object.keys(first.cells), ["waterFill", "nutrientFill", "count"]);
+	assert.deepEqual(Object.keys(first.cells), ["waterFill", "nutrientFill", "count", "temperatureOptimum", "moistureOptimum", "region"]);
 	for (const array of Object.values(first.cells)) {
-		assert.ok(array instanceof Float32Array || array instanceof Uint32Array);
+		assert.ok(array instanceof Float32Array || array instanceof Uint32Array || array instanceof Int32Array);
 		assert.equal(array.length, cellCount);
 	}
 	assert.equal(first.maxPerCell, 50);
 	assert.ok(first.cells.waterFill.every((fill) => fill >= 0 && fill <= 1));
 	const posted = harness.transfers.at(-1);
-	assert.deepEqual(posted, [first.cells.waterFill.buffer, first.cells.nutrientFill.buffer, first.cells.count.buffer]);
+	assert.deepEqual(posted, Object.values(first.cells).map((array) => array.buffer));
 
 	harness.controller.handle({ type: "step", ticks: 30 });
 	const later = harness.last("snapshot");
@@ -411,4 +419,46 @@ test("loading a new world stops the inspection", () => {
 	const before = harness.messages.filter((message) => message.type === "cell").length;
 	harness.controller.handle({ type: "step", ticks: 1 });
 	assert.equal(harness.messages.filter((message) => message.type === "cell").length, before);
+});
+
+test("each snapshot carries the cells' mean traits, dispersal regions, and how traits diverge between regions", () => {
+	// A larger world than the others, because it needs several land regions that organisms occupy.
+	const world = createGlobeMap({ poleToPoleCells: 40, seed: 7 });
+	const params = { seed: 7, founders: 200, species: "evolving", dispersal: 0.15, speed: 10 };
+	const species = { ...SPECIES_PRESETS.evolving, dispersalChance: params.dispersal };
+	const habitat = createHabitat(world);
+	const population = createPopulation(world, { seed: params.seed, initialCount: params.founders, species });
+	const simulation = createSimulation();
+	simulation.setWorld(structuredClone(extractSimulationInput(world)));
+	simulation.configure(params);
+	const { regionOfCell, regionCount } = getDispersalRegions(population, habitat);
+	for (const ticks of [0, 150]) {
+		if (ticks > 0) {
+			stepPopulation(population, habitat, ticks);
+			simulation.step(ticks);
+		}
+		const { cells, groups } = simulation.snapshot();
+		assert.deepEqual(Array.from(cells.region), regionOfCell);
+		assert.equal(groups.regions, regionCount);
+		const reference = summarizeGroups(population, regionOfCell);
+		assert.equal(groups.occupied, reference.groups.length);
+		for (const cell of world.cells) {
+			const organisms = getCellOrganisms(population, cell.id);
+			const traits = summarizeTraits(organisms);
+			for (const trait of ["temperatureOptimum", "moistureOptimum"]) {
+				if (traits === null) assert.ok(Number.isNaN(cells[trait][cell.id]), `${trait} of empty cell ${cell.id}`);
+				else assert.equal(cells[trait][cell.id], Math.fround(traits[trait].mean), `${trait} of cell ${cell.id} at tick ${ticks}`);
+			}
+		}
+		if (ticks === 150) {
+			assert.ok(groups.occupied >= 3, `only ${groups.occupied} regions are occupied`);
+			for (const trait of ["temperatureOptimum", "moistureOptimum"]) {
+				assert.ok(reference.divergence[trait].between > 0, "the run has diverged enough to compare");
+				assert.ok(Math.abs(groups.divergence[trait].betweenShare - reference.divergence[trait].betweenShare) < 1e-9);
+			}
+		}
+	}
+	const first = simulation.snapshot();
+	first.cells.region.fill(-5);
+	assert.ok(simulation.snapshot().cells.region.every((region) => region !== -5), "each snapshot gets its own copy of the regions");
 });
