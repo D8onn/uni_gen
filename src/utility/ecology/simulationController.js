@@ -8,8 +8,10 @@ const SNAPSHOT_INTERVAL_MS = 100;
 const RATE_WINDOW_MS = 1000;
 
 /**
- * Handles `world` {input}, `configure` {params}, `reset`, `play`, `pause`, `step` {ticks}, and `speed` {ticksPerSecond} messages.
- * Every outcome is posted back as `snapshot` {params, running, ticksPerSecond, summary, maxPerCell, cells} or `error` {message}; `cells` holds per-cell typed arrays indexed by cell id.
+ * Handles `world` {input}, `configure` {params}, `reset`, `play`, `pause`, `step` {ticks}, `speed` {ticksPerSecond}, and
+ * `inspect` {cellId} (a cell id, or null to stop) messages.
+ * Every outcome is posted back as `snapshot` {params, running, ticksPerSecond, summary, maxPerCell, cells} or `error` {message};  `cells` holds per-cell typed arrays indexed by cell id.
+ * While a cell is being inspected, each snapshot is followed by a `cell` message with that cell's habitat and organisms (`inspectCell`).
  * `post(message, transferList)` receives the buffers to transfer. `now`, `schedule`, and `cancel` are injectable so tests can drive the clock.
  */
 export function createSimulationController({
@@ -29,12 +31,14 @@ export function createSimulationController({
 	let rateStart = 0;
 	let rateTicks = 0;
 	let ticksPerSecond = 0;
+	let inspected = null; // the cell whose details follow every snapshot
 
 	function postSnapshot() {
 		lastPost = now();
 		const { params, summary, maxPerCell, cells } = simulation.snapshot();
 		// The per-cell arrays are fresh copies, so their buffers move to the page without copying.
 		post({ type: "snapshot", params: { ...params, speed }, running, ticksPerSecond, summary, maxPerCell, cells }, Object.values(cells).map((array) => array.buffer));
+		if (inspected !== null) post({ type: "cell", ...simulation.inspectCell(inspected) });
 	}
 
 	function stop() {
@@ -85,6 +89,7 @@ export function createSimulationController({
 			stop();
 			simulation.setWorld(input);
 			configured = false;
+			inspected = null; // a new world may have a different set of cells
 		},
 		configure({ params }) {
 			stop();
@@ -114,6 +119,15 @@ export function createSimulationController({
 			requireConfigured();
 			stop();
 			simulation.step(ticks);
+		},
+		inspect({ cellId }) {
+			if (cellId === null) {
+				inspected = null;
+				return;
+			}
+			requireConfigured();
+			simulation.inspectCell(cellId); // throws a RangeError for an unknown cell before it is remembered
+			inspected = cellId;
 		},
 		speed({ ticksPerSecond: value }) {
 			if (!Number.isInteger(value) || value < 1 || value > MAX_SPEED) {

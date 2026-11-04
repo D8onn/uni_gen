@@ -35,14 +35,15 @@ export function getSurfaceType(cell) {
 	return cell.hasRiver ? "River" : cell.biome;
 }
 
-// Each boundary corner sits at the mean surface elevation of the three cells meeting there.
+// A boundary corner sits at the mean surface elevation of the three cells meeting there.
+function getFacePosition(world, face) {
+	const averageElevation =
+		face.cellIds.reduce((sum, id) => sum + world.cells[id].surfaceElevation, 0) / face.cellIds.length;
+	return scale(face.center, world.radius + averageElevation);
+}
+
 function getFacePositions(world) {
-	return world.faces.map((face) => {
-		const averageElevation =
-			face.cellIds.reduce((sum, id) => sum + world.cells[id].surfaceElevation, 0) /
-			face.cellIds.length;
-		return scale(face.center, world.radius + averageElevation);
-	});
+	return world.faces.map((face) => getFacePosition(world, face));
 }
 
 // Appends the cell's triangles (centre, corner, next corner), each wound to face outward.
@@ -126,4 +127,15 @@ export function paintCellColors(target, cellVertexStart, cellColors) {
 			target[vertex + 2] = blue;
 		}
 	}
+}
+
+const OUTLINE_LIFT = 1.004;
+
+// The cell's boundary corners in order, as flat x, y, z values just above the surface, for drawing a loop around it.
+export function buildCellOutline(world, cellId) {
+	const cell = world.cells[cellId];
+	if (!cell) throw new RangeError(`Unknown cell id: ${cellId}.`);
+	return Float32Array.from(
+		cell.boundaryFaceIds.flatMap((faceId) => scale(getFacePosition(world, world.faces[faceId]), OUTLINE_LIFT))
+	);
 }

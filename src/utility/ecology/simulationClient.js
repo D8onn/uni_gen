@@ -2,7 +2,8 @@
 
 /**
  * Starts the worker. `subscribe(listener)` replays the latest snapshot (or the latest error while
- * there is none), then calls `listener(message)` with every `snapshot` or `error` message the worker posts.
+ * there is none), then calls `listener(message)` with every `snapshot`, `cell`, or `error` message the worker posts.
+ * `inspect(cellId)` asks for a cell's details with every snapshot from now on; `inspect(null)` stops.
  */
 export function createSimulationClient() {
 	const worker = new Worker(new URL("./simulation.worker.js", import.meta.url), { type: "module" });
@@ -12,7 +13,7 @@ export function createSimulationClient() {
 
 	function dispatch(message) {
 		if (message.type === "snapshot") latestSnapshot = message;
-		else latestError = message;
+		else if (message.type === "error") latestError = message;
 		for (const listener of listeners) listener(message);
 	}
 
@@ -32,6 +33,7 @@ export function createSimulationClient() {
 		play: () => worker.postMessage({ type: "play" }),
 		pause: () => worker.postMessage({ type: "pause" }),
 		step: (ticks = 1) => worker.postMessage({ type: "step", ticks }),
+		inspect: (cellId) => worker.postMessage({ type: "inspect", cellId }),
 		setSpeed: (ticksPerSecond) => worker.postMessage({ type: "speed", ticksPerSecond }),
 		terminate: () => worker.terminate(),
 	};
