@@ -32,9 +32,26 @@ Settings come from the URL; a missing one takes its default, and an invalid one 
 | `dispersal` | `dispersalChance`, the chance an offspring moves to a neighboring land cell | 0.1 | 0 to 1 |
 | `speed` | Ticks per second while playing | 10 | 1 to 200 |
 
-For example, `?seed=12345&founders=500&species=neutral&dispersal=0&speed=50`. The same URL reproduces the same simulation tick for tick, however fast or in whatever steps it is run.
+Advanced settings override one species parameter or habitat rate each (see the Organism Model, Heritable Traits, and Habitat sections). A species parameter's default comes from the chosen `species`:
 
-The panel mirrors these settings. **Play/Pause** and **Step** (one tick) control time. **Apply** restarts the simulation at tick 0 with the entered settings and writes them to the URL; changing the seed reloads the page because the globe is built for one seed. **Reset** restarts with the last applied settings and discards unapplied edits. Changing **Ticks/sec** takes effect immediately without a restart. Speed is a target: the simulation alone takes about 2 ms a tick at 10,000 organisms and 3 ms at 15,000 in Node (`node scripts/tick-benchmark.mjs`), so very high speeds fall behind, and the panel shows the achieved rate.
+| Parameter | Meaning | Default (`evolving` / `neutral`) | Range |
+| --- | --- | --- | --- |
+| `selectionStrength` | How strongly a poor trait match slows growth | 2 / 0 | 0 or more |
+| `mutationRate` | Chance each trait of an offspring mutates | 0.1 / 0 | 0 to 1 |
+| `mutationSize` | Standard deviation of a mutation step | 0.05 | 0 or more |
+| `mortalityChance` | Chance per tick an organism dies of other causes | 0.01 | 0 to 1 |
+| `reproductionChance` | Chance per tick an organism at `reproductionBiomass` reproduces | 0.5 | 0 to 1 |
+| `growthRate` | Share of biomass gained per tick at full light, food, and trait match | 0.2 | 0 to 1 |
+| `maintenance` | Share of biomass lost per tick | 0.05 | 0 to 1 |
+| `maxPerCell` | Most organisms one cell holds | 50 | positive integer |
+| `waterRegeneration` | Water `regeneration` rate | 0.1 | 0 to 1 |
+| `waterSpread` | Water `spread` rate | 0.3 | 0 to 1 |
+| `nutrientRegeneration` | Nutrients `regeneration` rate | 0.02 | 0 to 1 |
+| `nutrientSpread` | Nutrients `spread` rate | 0.05 | 0 to 1 |
+
+For example, `?seed=12345&founders=500&species=neutral&dispersal=0&speed=50`, or `?seed=12345&founders=500&species=evolving&dispersal=0.1&speed=10&selectionStrength=1` for weaker selection. The five basic settings are always written to the URL, and an advanced setting only when it differs from its default, so `species=evolving&selectionStrength=2` becomes `species=evolving`. The same URL reproduces the same simulation tick for tick, however fast or in whatever steps it is run.
+
+The panel mirrors these settings, with the advanced ones under **Advanced** (grouped as Species and Habitat; hover a field for its URL name). Choosing a species fills the advanced fields with that species' defaults without applying them. **Play/Pause** and **Step** (one tick) control time. **Apply** restarts the simulation at tick 0 with the entered settings and writes them to the URL once the simulation has accepted them; changing the seed reloads the page because the globe is built for one seed. An invalid value shows its error and changes nothing; settings the simulation rejects (for example more founders than `maxPerCell` leaves room for) show its error, pause the run, and put the last applied settings back in the fields and the URL. **Reset** restarts with the last applied settings and discards unapplied edits. Changing **Ticks/sec** takes effect immediately without a restart. Speed is a target: the simulation alone takes about 2 ms a tick at 10,000 organisms and 3 ms at 15,000 in Node (`node scripts/tick-benchmark.mjs`), so very high speeds fall behind, and the panel shows the achieved rate.
 
 ### Views
 

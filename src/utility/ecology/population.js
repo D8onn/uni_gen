@@ -1,6 +1,6 @@
 // Individual organisms of one abstract producer species that live on habitat cells; see the README.
 import { createSeededRandom } from "../planet/seededRandom.js";
-import { consumeResource, RESOURCES, stepHabitat } from "./habitat.js";
+import { consumeResource, describeLimit, isWithinLimit, RESOURCES, stepHabitat } from "./habitat.js";
 
 // Each heritable trait is the optimum of one habitat condition.
 export const TRAIT_CONDITIONS = { temperatureOptimum: "temperature", moistureOptimum: "moisture" };
@@ -35,16 +35,20 @@ export const EVOLVING_PRODUCER = {
 };
 export const DEATH_CAUSES = ["starvation", "oldAge", "mortality"];
 
-const FRACTION_PARAMETERS = [
-	"growthRate",
-	"maintenance",
-	"reproductionChance",
-	"mortalityChance",
-	"mutationRate",
-	"dispersalChance",
-];
-const NON_NEGATIVE_PARAMETERS = ["selectionStrength", "mutationSize"];
-const COUNT_PARAMETERS = ["maxAge", "maxPerCell", "maxOrganisms"];
+// The limit kind (see `LIMIT_KINDS` in habitat.js) of each single-number species parameter; founder trait values are fractions.
+export const SPECIES_KINDS = {
+	growthRate: "fraction",
+	maintenance: "fraction",
+	reproductionChance: "fraction",
+	mortalityChance: "fraction",
+	mutationRate: "fraction",
+	dispersalChance: "fraction",
+	selectionStrength: "nonNegative",
+	mutationSize: "nonNegative",
+	maxAge: "count",
+	maxPerCell: "count",
+	maxOrganisms: "count",
+};
 
 // Below this total variance a trait is, for any real organism, identical everywhere: the rest is rounding noise, which must not read as a share.
 const NEGLIGIBLE_VARIANCE = 1e-12;
@@ -71,18 +75,11 @@ function resolveSpecies(overrides) {
 	for (const [resource, value] of Object.entries(species.uptake)) {
 		require(Number.isFinite(value) && value >= 0, `${resource} uptake must be a non-negative number.`);
 	}
-	for (const name of FRACTION_PARAMETERS) {
-		const value = species[name];
-		require(Number.isFinite(value) && value >= 0 && value <= 1, `${name} must be a number from 0 to 1.`);
+	for (const [name, kind] of Object.entries(SPECIES_KINDS)) {
+		require(isWithinLimit(kind, species[name]), `${name} must ${describeLimit(kind)}.`);
 	}
 	for (const [trait, value] of Object.entries(species.founderTraits)) {
-		require(Number.isFinite(value) && value >= 0 && value <= 1, `founder ${trait} must be a number from 0 to 1.`);
-	}
-	for (const name of NON_NEGATIVE_PARAMETERS) {
-		require(Number.isFinite(species[name]) && species[name] >= 0, `${name} must be a non-negative number.`);
-	}
-	for (const name of COUNT_PARAMETERS) {
-		require(Number.isInteger(species[name]) && species[name] >= 1, `${name} must be a positive integer.`);
+		require(isWithinLimit("fraction", value), `founder ${trait} must ${describeLimit("fraction")}.`);
 	}
 	const { minBiomass, offspringBiomass, reproductionBiomass, maxBiomass } = species;
 	require(
