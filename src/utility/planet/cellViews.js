@@ -51,7 +51,7 @@ export const CELL_VIEWS = [
 		ramp: EMPTY_TO_FULL_WATER,
 		low: "0 empty",
 		high: "1 full",
-		help: "Water in each cell as a fraction of its capacity: 0 empty, 1 full. It changes during a run.",
+		help: "Water in each cell as a fraction of its capacity: 0 empty, 1 full. It drops where organisms feed and recovers by regeneration and spread.",
 	},
 	{
 		id: "nutrientFill",
@@ -60,7 +60,7 @@ export const CELL_VIEWS = [
 		ramp: EMPTY_TO_FULL_NUTRIENTS,
 		low: "0 empty",
 		high: "1 full",
-		help: "Nutrients in each cell as a fraction of its capacity: 0 empty, 1 full. It changes during a run.",
+		help: "Nutrients in each cell as a fraction of its capacity: 0 empty, 1 full. It drops where organisms feed and recovers by regeneration and spread.",
 	},
 	{
 		id: "density",
