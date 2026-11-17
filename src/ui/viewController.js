@@ -5,13 +5,14 @@ import { getMarkerUnit, placeMarkers, SMALL_UNIT } from "../utility/planet/popul
 
 /**
  * `planet` is what `createPlanet` returns and `client` the simulation client. `select(viewId)` switches
- * the view and returns its legend (null for the biome view); trees show only in the biome view.
+ * the view and returns its legend; trees show only in the biome view. `setShowEmptyLand(on)` dims empty land in its region's colour in the region view.
  * Markers (one per group of organisms, see `placeMarkers`) follow every snapshot; `setMarkersVisible` shows or hides them,
  * and `onMarkers(listener)` reports `{ unit, shown, organisms }` after each update (and at once if there is one).
  */
 export function createViewController({ planet, client }) {
 	const { conditions } = createHabitat(planet.world);
 	let viewId = "biome";
+	let showEmptyLand = false;
 	let snapshot = null;
 	let unit = SMALL_UNIT;
 	let markerInfo = null;
@@ -20,7 +21,7 @@ export function createViewController({ planet, client }) {
 	function apply() {
 		if (isLiveView(viewId) && snapshot === null) return; // keep the current colours until the first snapshot
 		planet.setCellColors(
-			computeCellColors(viewId, { world: planet.world, conditions, cells: snapshot?.cells, maxPerCell: snapshot?.maxPerCell })
+			computeCellColors(viewId, { world: planet.world, conditions, cells: snapshot?.cells, maxPerCell: snapshot?.maxPerCell, showEmptyLand })
 		);
 		planet.setTreesVisible(viewId === "biome");
 	}
@@ -49,6 +50,10 @@ export function createViewController({ planet, client }) {
 			viewId = id;
 			apply();
 			return legend;
+		},
+		setShowEmptyLand(on) {
+			showEmptyLand = on;
+			apply();
 		},
 		setMarkersVisible: (visible) => planet.setMarkersVisible(visible),
 		onMarkers(listener) {

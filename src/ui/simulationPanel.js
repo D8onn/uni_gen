@@ -1,5 +1,7 @@
 // Control panel for the browser simulation: settings that mirror the URL, playback buttons, and live statistics.
-import { groupLines } from "./groupLines.js";
+import { DIVERGENCE_HELP, groupLines } from "./groupLines.js";
+import { createHelpDisclosure } from "./helpDisclosure.js";
+import { getViewLegend } from "../utility/planet/cellViews.js";
 import {
 	MAX_FOUNDERS,
 	MAX_SPEED,
@@ -31,7 +33,7 @@ function sum(values) {
 
 /**
  * Adds the panel to the page. `params` are the settings the simulation was started with, and `views`
- * is a view controller (`list` of views; `select(id)` applies one and returns its legend; the organism markers
+ * is a view controller (`list` of views; `select(id)` applies one and returns its legend; `setShowEmptyLand` sets the region view's option; the organism markers
  * can be shown or hidden, and their size is reported through `onMarkers`).
  * Apply restarts the simulation with the entered settings; changing the seed reloads the page
  * because the globe is built for one seed. Reset restarts with the last applied settings.
@@ -65,7 +67,16 @@ export function createSimulationPanel({ client, params, views }) {
 
 	function showLegend(viewLegend) {
 		legend.replaceChildren();
-		if (!viewLegend) return;
+		if (viewLegend.swatches) {
+			const swatches = viewLegend.swatches.map(({ label, color }) =>
+				element("div", { style: "display: flex; align-items: center; gap: 4px;" }, [
+					element("span", { style: `flex: none; width: 10px; height: 10px; background: ${color};` }),
+					element("span", { text: label }),
+				])
+			);
+			legend.append(element("div", { text: viewLegend.title }), element("div", { style: "display: grid; grid-template-columns: 1fr 1fr; gap: 2px 8px;" }, swatches));
+			return;
+		}
 		if (viewLegend.note) {
 			legend.append(element("div", { text: viewLegend.title }), element("div", { text: viewLegend.note, style: "opacity: 0.8;" }));
 			return;
@@ -77,7 +88,19 @@ export function createSimulationPanel({ client, params, views }) {
 		]);
 		legend.append(element("div", { text: `${viewLegend.title} (unitless)` }), bar, ends);
 	}
-	viewSelect.addEventListener("change", () => showLegend(views.select(viewSelect.value)));
+	const viewHelp = createHelpDisclosure({ summary: "Help", text: "" });
+	const emptyLandToggle = element("input", { type: "checkbox" });
+	const emptyLandRow = element("label", { style: FIELD_STYLE }, [element("span", { text: "Show empty land" }), emptyLandToggle]);
+	emptyLandToggle.addEventListener("change", () => views.setShowEmptyLand(emptyLandToggle.checked));
+	function showViewHelp(viewId) {
+		const view = views.list.find(({ id }) => id === viewId);
+		viewHelp.setText(view.help);
+		emptyLandRow.style.display = view.emptyLandOption ? "flex" : "none";
+	}
+	viewSelect.addEventListener("change", () => {
+		showLegend(views.select(viewSelect.value));
+		showViewHelp(viewSelect.value);
+	});
 
 	const markerToggle = element("input", { type: "checkbox", checked: true });
 	const markerNote = element("span", { style: "opacity: 0.8;" });
@@ -92,11 +115,14 @@ export function createSimulationPanel({ client, params, views }) {
 		rows(resetButton, applyButton),
 		message,
 		stats,
+		createHelpDisclosure({ summary: "Divergence T/M", text: DIVERGENCE_HELP }).node,
 	]);
 	const panel = element("section", { style: PANEL_STYLE }, [
 		element("strong", { text: "Simulation", style: "display: block; margin-bottom: 8px;" }),
 		element("label", { style: FIELD_STYLE }, [element("span", { text: "View" }), viewSelect]),
 		legend,
+		viewHelp.node,
+		emptyLandRow,
 		element("label", { style: FIELD_STYLE }, [element("span", { text: "Organisms" }), element("span", {}, [markerNote, " ", markerToggle])]),
 		form,
 	]);
@@ -172,6 +198,8 @@ export function createSimulationPanel({ client, params, views }) {
 		].join("\n");
 	}
 
+	showLegend(getViewLegend(viewSelect.value));
+	showViewHelp(viewSelect.value);
 	showParams(applied);
 	client.subscribe((event) => {
 		if (event.type === "snapshot") render(event);
