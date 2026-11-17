@@ -8,11 +8,14 @@ const land = world.cells.filter((cell) => cell.biome !== "Water");
 
 // A planet and client that record what the controller does.
 function createHarness() {
-	const calls = { markers: [], colors: 0, trees: [] };
+	const calls = { markers: [], colors: 0, lastColors: null, trees: [] };
 	let listener = null;
 	const planet = {
 		world,
-		setCellColors: () => (calls.colors += 1),
+		setCellColors: (colors) => {
+			calls.colors += 1;
+			calls.lastColors = colors;
+		},
 		setTreesVisible: (visible) => calls.trees.push(visible),
 		setMarkers: (markers, unit) => calls.markers.push({ markers, unit }),
 		setMarkersVisible: () => {},
@@ -31,7 +34,12 @@ function createHarness() {
 				type: "snapshot",
 				summary: { tick, count: organisms },
 				maxPerCell: 50,
-				cells: { count, waterFill: new Float32Array(world.cells.length).fill(1), nutrientFill: new Float32Array(world.cells.length).fill(1) },
+				cells: {
+					count,
+					waterFill: new Float32Array(world.cells.length).fill(1),
+					nutrientFill: new Float32Array(world.cells.length).fill(1),
+					region: Int32Array.from(world.cells, (cell) => (cell.biome === "Water" ? -1 : 0)),
+				},
 			});
 			return infos.at(-1);
 		},
@@ -86,4 +94,22 @@ test("live views recolour on snapshots and trees show only in the biome view", (
 	assert.equal(calls.colors, colorsAfterTemperature, "a fixed view is not recoloured by snapshots");
 	controller.select("biome");
 	assert.equal(calls.trees.at(-1), true);
+});
+
+test("Show empty land recolours the empty land of the region view and leaves the biome view alone", () => {
+	const { snapshot, calls, controller } = createHarness();
+	snapshot(0, 1);
+	controller.select("biome");
+	const biome = calls.lastColors;
+	controller.setShowEmptyLand(true);
+	assert.deepEqual(calls.lastColors, biome, "the biome view ignores the option");
+	controller.setShowEmptyLand(false);
+	controller.select("region");
+	const off = calls.lastColors;
+	const emptyLand = land.at(-1).id;
+	controller.setShowEmptyLand(true);
+	const on = calls.lastColors;
+	assert.notDeepEqual(Array.from(on.slice(emptyLand * 3, emptyLand * 3 + 3)), Array.from(off.slice(emptyLand * 3, emptyLand * 3 + 3)));
+	controller.setShowEmptyLand(false);
+	assert.deepEqual(calls.lastColors, off);
 });

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { groupLines } from "../src/ui/groupLines.js";
+import { DIVERGENCE_HELP, groupLines } from "../src/ui/groupLines.js";
 
 test("the lines give the occupied and total regions and the between-region share of each trait", () => {
 	const lines = groupLines({
@@ -17,4 +17,10 @@ test("a share that cannot be computed, or no organisms at all, shows a dash", ()
 		"Divergence  T -  M 0.00",
 	]);
 	assert.deepEqual(groupLines({ regions: 3, occupied: 0, divergence: null }), ["Regions     0/3 occupied", "Divergence  T -  M -"]);
+});
+
+test("the divergence help explains both shares", () => {
+	assert.ok(DIVERGENCE_HELP.length > 0);
+	assert.match(DIVERGENCE_HELP, /\bT\b/);
+	assert.match(DIVERGENCE_HELP, /\bM\b/);
 });

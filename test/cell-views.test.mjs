@@ -25,7 +25,8 @@ const rgb = (hex) => [(hex >> 16) / 255, ((hex >> 8) & 255) / 255, (hex & 255) /
 
 test("the views are the biome view plus each habitat field, with a legend for every field", () => {
 	assert.deepEqual(CELL_VIEWS.map(({ id }) => id), ["biome", "temperature", "moisture", "light", "waterFill", "nutrientFill", "density", "temperatureOptimum", "moistureOptimum", "region"]);
-	assert.equal(getViewLegend("biome"), null);
+	assert.deepEqual(Object.keys(getViewLegend("biome")), ["title", "swatches"], "the biome view lists its surface colours");
+	assert.equal(getViewLegend("biome").title, "Biome");
 	for (const { id } of CELL_VIEWS.slice(1)) {
 		const legend = getViewLegend(id);
 		if (id === "region") {
@@ -50,6 +51,20 @@ test("the biome view colours each cell as the renderer coloured its surface, riv
 		const actual = new THREE.Color().setRGB(...colorOf(colors, cell.id), THREE.SRGBColorSpace);
 		near([actual.r, actual.g, actual.b], [expected.r, expected.g, expected.b], `cell ${cell.id}`);
 	}
+});
+
+test("the biome legend lists every surface type with the renderer's colour", () => {
+	const { swatches } = getViewLegend("biome");
+	const labels = swatches.map(({ label }) => label);
+	assert.deepEqual(labels, [...SURFACE_COLORS.keys()]);
+	assert.ok(labels.includes("River"));
+	for (const { label, color } of swatches) assert.equal(color, `#${SURFACE_COLORS.get(label).toString(16).padStart(6, "0")}`, label);
+	for (const cell of world.cells) assert.ok(labels.includes(getSurfaceType(cell)), `cell ${cell.id}`);
+});
+
+test("every view has help text", () => {
+	for (const { id, help } of CELL_VIEWS) assert.ok(typeof help === "string" && help.length >= 40, id);
+	assert.equal(new Set(CELL_VIEWS.map(({ id }) => id)).size, CELL_VIEWS.length);
 });
 
 test("a field view maps 0 and 1 to the ends of its ramp and blends between the stops", () => {
@@ -194,4 +209,32 @@ test("on a real run the region view keeps the colour of every cell that stays oc
 	const changed = world.cells.filter((cell) => (countsBefore[cell.id] > 0) !== (countsAfter[cell.id] > 0));
 	assert.ok(kept.length > 10 && changed.length > 0, "the run keeps some cells and changes others");
 	for (const cell of kept) assert.deepEqual(colorOf(after, cell.id), colorOf(before, cell.id), `cell ${cell.id}`);
+});
+
+test("Show empty land dims empty land in its region's colour", () => {
+	const cells = { region: Int32Array.of(0, 1, 0, -1), count: Uint32Array.of(2, 4, 0, 0) };
+	const off = computeCellColors("region", { world: fourCells, cells });
+	const on = computeCellColors("region", { world: fourCells, cells, showEmptyLand: true });
+	near(colorOf(on, 2), colorOf(on, 0).map((channel) => channel * 0.5), "an empty cell in region 0 at half brightness");
+	near(colorOf(on, 3), NEUTRAL, "a cell in no region stays neutral");
+	for (const cell of [0, 1]) assert.deepEqual(colorOf(on, cell), colorOf(off, cell), `occupied cell ${cell}`);
+	near(colorOf(off, 2), NEUTRAL, "without the option an empty cell is neutral");
+	// Views without the option ignore it.
+	const traits = { count: cells.count, temperatureOptimum: Float32Array.of(0, 1, 0.5, 0.5) };
+	assert.deepEqual(computeCellColors("temperatureOptimum", { world: fourCells, cells: traits, showEmptyLand: true }), computeCellColors("temperatureOptimum", { world: fourCells, cells: traits }));
+});
+
+test("on a real run Show empty land colours every land cell and leaves water neutral", () => {
+	const habitat = createHabitat(world);
+	const population = createPopulation(world, { seed: 1, initialCount: 150, species: EVOLVING_PRODUCER });
+	stepPopulation(population, createHabitat(world), 30);
+	const cells = { region: Int32Array.from(getDispersalRegions(population, habitat).regionOfCell), count: getCellCounts(population) };
+	const off = computeCellColors("region", { world, cells });
+	const on = computeCellColors("region", { world, cells, showEmptyLand: true });
+	assert.ok(world.cells.some((cell) => cell.biome !== "Water" && cells.count[cell.id] === 0), "the run leaves some land empty");
+	for (const cell of world.cells) {
+		if (cell.biome === "Water") near(colorOf(on, cell.id), NEUTRAL, `water cell ${cell.id}`);
+		else assert.ok(colorOf(on, cell.id).some((value, channel) => Math.abs(value - NEUTRAL[channel]) > 1e-3), `land cell ${cell.id}`);
+		if (cells.count[cell.id] > 0) assert.deepEqual(colorOf(on, cell.id), colorOf(off, cell.id), `occupied cell ${cell.id}`);
+	}
 });
