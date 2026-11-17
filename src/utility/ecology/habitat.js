@@ -81,7 +81,8 @@ function stepResource(habitat, resource) {
 	const capacity = habitat.capacity[resource];
 	const stocks = habitat.resources[resource];
 	const { regeneration, spread } = habitat.rates[resource];
-	const maxNeighbors = Math.max(1, ...neighbors.map((cellNeighbors) => cellNeighbors.length));
+	let maxNeighbors = 1;
+	for (const cellNeighbors of neighbors) maxNeighbors = Math.max(maxNeighbors, cellNeighbors.length);
 	const edgeRate = spread / maxNeighbors;
 	const fill = stocks.map((stock, id) => (capacity[id] > 0 ? stock / capacity[id] : 0));
 	habitat.resources[resource] = stocks.map((stock, id) => {

@@ -1,6 +1,6 @@
 // Individual organisms of one abstract producer species that live on habitat cells; see the README.
 import { createSeededRandom } from "../planet/seededRandom.js";
-import { consumeResource, getCellHabitat, RESOURCES, stepHabitat } from "./habitat.js";
+import { consumeResource, RESOURCES, stepHabitat } from "./habitat.js";
 
 // Each heritable trait is the optimum of one habitat condition.
 export const TRAIT_CONDITIONS = { temperatureOptimum: "temperature", moistureOptimum: "moisture" };
@@ -155,11 +155,10 @@ export function createPopulation(world, { seed = 1, initialCount = 0, species = 
 
 // The share of demand a cell can meet, taken from its stocks; the limiting resource sets it for all.
 function feedCell(habitat, cellId, biomass, uptake) {
-	const { resources } = getCellHabitat(habitat, cellId);
 	let met = 1;
 	for (const resource of RESOURCES) {
 		const demand = uptake[resource] * biomass;
-		if (demand > 0) met = Math.min(met, resources[resource] / demand);
+		if (demand > 0) met = Math.min(met, habitat.resources[resource][cellId] / demand);
 	}
 	for (const resource of RESOURCES) {
 		consumeResource(habitat, cellId, resource, met * uptake[resource] * biomass);
@@ -197,15 +196,22 @@ function offspringCell(population, habitat, cellId, random) {
 }
 
 function stepOnce(population, habitat) {
-	const { species, seed, tick } = population;
+	const { species, seed, tick, habitable } = population;
 	const tally = emptyTally();
-	const cellBiomass = new Map();
+	// Per-cell scratch arrays indexed by cell id; cells are fed in first-seen order, kept in `occupied`.
+	const cellBiomass = new Float64Array(habitable.length);
+	const satisfaction = new Float64Array(habitable.length);
+	const seen = new Uint8Array(habitable.length);
+	const occupied = [];
 	for (const { cellId, biomass } of population.organisms) {
-		cellBiomass.set(cellId, (cellBiomass.get(cellId) ?? 0) + biomass);
+		if (!seen[cellId]) {
+			seen[cellId] = 1;
+			occupied.push(cellId);
+		}
+		cellBiomass[cellId] += biomass;
 	}
-	const satisfaction = new Map();
-	for (const [cellId, biomass] of cellBiomass) {
-		satisfaction.set(cellId, feedCell(habitat, cellId, biomass, species.uptake));
+	for (const cellId of occupied) {
+		satisfaction[cellId] = feedCell(habitat, cellId, cellBiomass[cellId], species.uptake);
 	}
 
 	const survivors = [];
@@ -213,7 +219,7 @@ function stepOnce(population, habitat) {
 	for (const organism of population.organisms) {
 		const light = habitat.conditions.light[organism.cellId];
 		const match = habitatMatch(habitat, organism.cellId, organism.traits, species.selectionStrength);
-		const growth = species.growthRate * light * satisfaction.get(organism.cellId) * match - species.maintenance;
+		const growth = species.growthRate * light * satisfaction[organism.cellId] * match - species.maintenance;
 		organism.biomass = Math.min(species.maxBiomass, organism.biomass * (1 + growth));
 		organism.age += 1;
 		const random = organismRandom(seed, tick, organism.id);
@@ -234,17 +240,17 @@ function stepOnce(population, habitat) {
 	}
 
 	// Offspring are admitted in parent-id order while the cell and global caps allow; a full target falls back to the parent's cell.
-	const cellCounts = new Map();
-	for (const { cellId } of survivors) cellCounts.set(cellId, (cellCounts.get(cellId) ?? 0) + 1);
+	const cellCounts = new Int32Array(habitable.length);
+	for (const { cellId } of survivors) cellCounts[cellId] += 1;
 	const offspring = [];
 	let dispersed = 0;
 	for (const { parent, random } of parents) {
 		const traits = inheritTraits(parent.traits, species, random);
 		let cellId = offspringCell(population, habitat, parent.cellId, random);
-		if ((cellCounts.get(cellId) ?? 0) >= species.maxPerCell) cellId = parent.cellId;
-		const count = cellCounts.get(cellId) ?? 0;
+		if (cellCounts[cellId] >= species.maxPerCell) cellId = parent.cellId;
+		const count = cellCounts[cellId];
 		if (count >= species.maxPerCell || survivors.length + offspring.length >= species.maxOrganisms) continue;
-		cellCounts.set(cellId, count + 1);
+		cellCounts[cellId] = count + 1;
 		parent.biomass -= species.offspringBiomass;
 		if (cellId !== parent.cellId) dispersed += 1;
 		offspring.push({
@@ -260,7 +266,8 @@ function stepOnce(population, habitat) {
 	population.dispersals.lastTick = dispersed;
 	population.dispersals.total += dispersed;
 
-	population.organisms = [...survivors, ...offspring];
+	for (const organism of offspring) survivors.push(organism);
+	population.organisms = survivors;
 	population.tick += 1;
 	population.lastTick = tally;
 	population.totals.births += tally.births;
