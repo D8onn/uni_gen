@@ -6,6 +6,24 @@ export const DEFAULT_RESOURCE_RATES = {
 	nutrients: { regeneration: 0.02, spread: 0.05 },
 };
 
+// The kinds of numeric limit the ecology parameters use, shared with the settings table in simulationParams.js.
+export const LIMIT_KINDS = {
+	fraction: { min: 0, max: 1 },
+	nonNegative: { min: 0, max: Infinity },
+	count: { min: 1, max: Infinity, integer: true },
+};
+const LIMIT_DESCRIPTIONS = { fraction: "be a number from 0 to 1", nonNegative: "be a non-negative number", count: "be a positive integer" };
+
+export function isWithinLimit(kind, value) {
+	const { min, max, integer } = LIMIT_KINDS[kind];
+	return (integer ? Number.isInteger(value) : Number.isFinite(value)) && value >= min && value <= max;
+}
+
+// The end of a "<name> must ..." message for `kind`.
+export function describeLimit(kind) {
+	return LIMIT_DESCRIPTIONS[kind];
+}
+
 function resolveRates(rates) {
 	for (const resource of Object.keys(rates)) {
 		if (!RESOURCES.includes(resource)) throw new RangeError(`Unknown resource: ${resource}.`);
@@ -14,8 +32,8 @@ function resolveRates(rates) {
 		RESOURCES.map((resource) => {
 			const resolved = { ...DEFAULT_RESOURCE_RATES[resource], ...rates[resource] };
 			for (const [name, value] of Object.entries(resolved)) {
-				if (!Number.isFinite(value) || value < 0 || value > 1) {
-					throw new RangeError(`${resource} ${name} must be a number from 0 to 1.`);
+				if (!isWithinLimit("fraction", value)) {
+					throw new RangeError(`${resource} ${name} must ${describeLimit("fraction")}.`);
 				}
 			}
 			return [resource, resolved];

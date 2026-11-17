@@ -1,8 +1,11 @@
 // Control panel for the browser simulation: settings that mirror the URL, playback buttons, and live statistics.
 import { DIVERGENCE_HELP, groupLines } from "./groupLines.js";
-import { createHelpDisclosure } from "./helpDisclosure.js";
+import { createDisclosure, createHelpDisclosure } from "./helpDisclosure.js";
+import { LIMIT_KINDS } from "../utility/ecology/habitat.js";
 import { getViewLegend } from "../utility/planet/cellViews.js";
 import {
+	ADVANCED_SETTINGS,
+	effectiveSettings,
 	MAX_FOUNDERS,
 	MAX_SPEED,
 	SPECIES_NAMES,
@@ -35,11 +38,12 @@ function sum(values) {
  * Adds the panel to the page. `params` are the settings the simulation was started with, and `views`
  * is a view controller (`list` of views; `select(id)` applies one and returns its legend; `setShowEmptyLand` sets the region view's option; the organism markers
  * can be shown or hidden, and their size is reported through `onMarkers`).
- * Apply restarts the simulation with the entered settings; changing the seed reloads the page
+ * Apply restarts the simulation with the entered settings, which count as applied once the worker reports running them; changing the seed reloads the page
  * because the globe is built for one seed. Reset restarts with the last applied settings.
  */
 export function createSimulationPanel({ client, params, views }) {
 	let applied = params;
+	let pending = null; // settings sent with Apply that the worker has not yet reported running
 	let running = false;
 
 	const inputs = {
@@ -53,6 +57,20 @@ export function createSimulationPanel({ client, params, views }) {
 	const fields = Object.entries(inputs).map(([name, input]) =>
 		element("label", { style: FIELD_STYLE }, [element("span", { text: labels[name] }), input])
 	);
+	const advancedInputs = Object.fromEntries(
+		ADVANCED_SETTINGS.map(({ name, kind }) => {
+			const { min, max } = LIMIT_KINDS[kind];
+			const range = Number.isFinite(max) ? { min, max } : { min };
+			return [name, element("input", { type: "number", ...range, step: kind === "count" ? 1 : "any", title: name, style: INPUT_STYLE })];
+		})
+	);
+	const advancedGroup = (group, heading) => [
+		element("div", { text: heading, style: "margin: 6px 0 4px; opacity: 0.8;" }),
+		...ADVANCED_SETTINGS.filter((setting) => setting.group === group).map(({ name, label }) =>
+			element("label", { style: FIELD_STYLE }, [element("span", { text: label }), advancedInputs[name]])
+		),
+	];
+	const advanced = createDisclosure({ summary: "Advanced", children: [...advancedGroup("species", "Species"), ...advancedGroup("habitat", "Habitat")] });
 
 	const playButton = element("button", { type: "button", text: "Play", style: BUTTON_STYLE });
 	const stepButton = element("button", { type: "button", text: "Step", style: BUTTON_STYLE });
@@ -111,6 +129,7 @@ export function createSimulationPanel({ client, params, views }) {
 
 	const form = element("form", { noValidate: true }, [
 		...fields,
+		advanced,
 		rows(playButton, stepButton),
 		rows(resetButton, applyButton),
 		message,
@@ -128,8 +147,13 @@ export function createSimulationPanel({ client, params, views }) {
 	]);
 	document.body.appendChild(panel);
 
+	function showAdvanced(values) {
+		for (const [name, input] of Object.entries(advancedInputs)) input.value = values[name];
+	}
+
 	function showParams(values) {
 		for (const [name, input] of Object.entries(inputs)) input.value = values[name];
+		showAdvanced(effectiveSettings(values));
 	}
 
 	function readParams() {
@@ -137,6 +161,11 @@ export function createSimulationPanel({ client, params, views }) {
 		for (const [name, input] of Object.entries(inputs)) {
 			if (input.value.trim() === "") throw new RangeError(`${labels[name]} must not be empty.`);
 			entered[name] = name === "species" ? input.value : Number(input.value);
+		}
+		for (const { name, label } of ADVANCED_SETTINGS) {
+			const { value } = advancedInputs[name];
+			if (value.trim() === "") throw new RangeError(`${label} must not be empty.`);
+			entered[name] = Number(value);
 		}
 		return validateSimulationParams(entered);
 	}
@@ -162,11 +191,12 @@ export function createSimulationPanel({ client, params, views }) {
 				window.location.assign(`${window.location.pathname}?${toSearchParams(next)}`);
 				return;
 			}
-			applied = next;
-			updateUrl(applied);
-			client.configure(applied);
+			pending = next;
+			client.configure(next);
 		});
 	});
+	// Choosing a species fills the advanced settings with its defaults, without applying them.
+	inputs.species.addEventListener("change", () => showAdvanced(effectiveSettings({ species: inputs.species.value })));
 	resetButton.addEventListener("click", () => {
 		showParams(applied);
 		message.textContent = "";
@@ -201,9 +231,23 @@ export function createSimulationPanel({ client, params, views }) {
 	showLegend(getViewLegend(viewSelect.value));
 	showViewHelp(viewSelect.value);
 	showParams(applied);
+	const sameSettings = (a, b) => toSearchParams(a).toString() === toSearchParams(b).toString();
 	client.subscribe((event) => {
-		if (event.type === "snapshot") render(event);
-		else message.textContent = event.message;
+		if (event.type === "snapshot") {
+			if (pending !== null && sameSettings(pending, event.params)) {
+				applied = pending;
+				pending = null;
+				updateUrl(applied);
+			}
+			render(event);
+		} else {
+			// The worker rejected the pending Apply, so it keeps the applied settings and so do the inputs.
+			if (event.type === "error" && pending !== null) {
+				pending = null;
+				showParams(applied);
+			}
+			message.textContent = event.message;
+		}
 	});
 	return panel;
 }

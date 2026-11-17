@@ -2,7 +2,6 @@
 import { createHabitat, getCellHabitat, getResourceFill } from "./habitat.js";
 import {
 	createPopulation,
-	EVOLVING_PRODUCER,
 	getCellCounts,
 	getCellOrganisms,
 	getCellTraitMeans,
@@ -12,9 +11,9 @@ import {
 	stepPopulation,
 } from "./population.js";
 import { worldFromSimulationInput } from "./simulationInput.js";
-import { validateSimulationParams } from "./simulationParams.js";
+import { resolveRun, validateSimulationParams } from "./simulationParams.js";
 
-export const SPECIES_PRESETS = { evolving: EVOLVING_PRODUCER, neutral: {} };
+export { SPECIES_PRESETS } from "./simulationParams.js";
 
 // `speed` in the params only paces the worker; it never affects the simulation itself.
 export function createSimulation() {
@@ -25,9 +24,9 @@ export function createSimulation() {
 	function build(params) {
 		if (world === null) throw new Error("No world has been loaded.");
 		if (params.seed !== world.seed) throw new RangeError(`The loaded world has seed ${world.seed}, not ${params.seed}.`);
-		const species = { ...SPECIES_PRESETS[params.species], dispersalChance: params.dispersal };
-		const habitat = createHabitat(world);
-		const population = createPopulation(world, { seed: params.seed, initialCount: params.founders, species });
+		const run = resolveRun(params);
+		const habitat = createHabitat(world, run.rates);
+		const population = createPopulation(world, { seed: params.seed, initialCount: params.founders, species: run.species });
 		state = { params, habitat, population, regions: getDispersalRegions(population, habitat) }; // regions never change once the world is fixed
 	}
 
