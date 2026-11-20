@@ -3,22 +3,43 @@
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
+const USAGE = "usage: node scripts/tick-benchmark.mjs [repoRoot] [--founders 3600,15000,36000] [--seed 42] [--ticks 500] [--window 100] [--reps 5]";
+const POSITIVE_OPTIONS = ["--ticks", "--window", "--reps"];
+const isWholeNumber = (text) => /^\d+$/.test(text);
+
 function parseArguments(args) {
 	const options = { root: resolve(new URL("..", import.meta.url).pathname), founders: [3600, 15000, 36000], seed: 42, ticks: 500, window: 100, reps: 5 };
 	for (let index = 0; index < args.length; index++) {
 		const name = args[index];
-		if (name === "--founders") options.founders = args[++index].split(",").map(Number);
-		else if (name === "--seed") options.seed = Number(args[++index]);
-		else if (name === "--ticks") options.ticks = Number(args[++index]);
-		else if (name === "--window") options.window = Number(args[++index]);
-		else if (name === "--reps") options.reps = Number(args[++index]);
-		else if (name.startsWith("--")) throw new RangeError(`Unknown option: ${name}.`);
-		else options.root = resolve(name);
+		if (!name.startsWith("--")) {
+			options.root = resolve(name);
+			continue;
+		}
+		if (name !== "--founders" && name !== "--seed" && !POSITIVE_OPTIONS.includes(name)) throw new RangeError(`Unknown option: ${name}.`);
+		const value = args[++index];
+		if (value === undefined || value.startsWith("--")) throw new RangeError(`${name} needs a value.`);
+		if (name === "--founders") {
+			const entries = value.split(",");
+			if (!entries.every(isWholeNumber)) throw new RangeError("--founders must be a comma-separated list of whole numbers, 0 or more.");
+			options.founders = entries.map(Number);
+		} else if (name === "--seed") {
+			if (!isWholeNumber(value) || Number(value) > 0xffffffff) throw new RangeError("--seed must be an unsigned 32-bit integer.");
+			options.seed = Number(value);
+		} else {
+			if (!isWholeNumber(value) || Number(value) < 1 || !Number.isSafeInteger(Number(value))) throw new RangeError(`${name} must be a positive integer.`);
+			options[name.slice(2)] = Number(value);
+		}
 	}
 	return options;
 }
 
-const options = parseArguments(process.argv.slice(2));
+let options;
+try {
+	options = parseArguments(process.argv.slice(2));
+} catch (error) {
+	console.error(`tick-benchmark: ${error.message}\n${USAGE}`);
+	process.exit(2);
+}
 const load = (path) => import(pathToFileURL(resolve(options.root, "src/utility", path)).href);
 const { createGlobeMap } = await load("planet/createGlobeMap.js");
 const { extractSimulationInput } = await load("ecology/simulationInput.js");

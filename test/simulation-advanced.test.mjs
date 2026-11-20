@@ -243,3 +243,82 @@ test("the readme lists every advanced URL setting", () => {
 		assert.match(readme, new RegExp(`^\\| \`${name}\` \\|`, "m"), name);
 	}
 });
+
+// Imported next to the tests that use it; import declarations are hoisted.
+import { refillForSpecies } from "../src/utility/ecology/simulationParams.js";
+
+test("limit kinds are pinned by literal values", () => {
+	assert.deepEqual(LIMIT_KINDS, {
+		fraction: { min: 0, max: 1 },
+		nonNegative: { min: 0, max: Infinity },
+		count: { min: 1, max: Infinity, integer: true },
+	});
+	assert.deepEqual(Object.fromEntries(ADVANCED_SETTINGS.map(({ name, kind }) => [name, kind])), {
+		selectionStrength: "nonNegative",
+		mutationRate: "fraction",
+		mutationSize: "nonNegative",
+		mortalityChance: "fraction",
+		reproductionChance: "fraction",
+		growthRate: "fraction",
+		maintenance: "fraction",
+		maxPerCell: "count",
+		waterRegeneration: "fraction",
+		waterSpread: "fraction",
+		nutrientRegeneration: "fraction",
+		nutrientSpread: "fraction",
+	});
+	assert.deepEqual(SPECIES_KINDS, {
+		growthRate: "fraction",
+		maintenance: "fraction",
+		reproductionChance: "fraction",
+		mortalityChance: "fraction",
+		mutationRate: "fraction",
+		dispersalChance: "fraction",
+		selectionStrength: "nonNegative",
+		mutationSize: "nonNegative",
+		maxAge: "count",
+		maxPerCell: "count",
+		maxOrganisms: "count",
+	});
+	const libraryAccepts = (overrides) => {
+		try {
+			createPopulation(world, { seed: 1, initialCount: 0, species: { ...SPECIES_PRESETS.evolving, ...overrides } });
+			return true;
+		} catch (error) {
+			assert.ok(error instanceof RangeError);
+			return false;
+		}
+	};
+	assert.equal(libraryAccepts({ mutationSize: 3.5 }), true);
+	assert.equal(libraryAccepts({ selectionStrength: 1e6 }), true);
+	assert.equal(libraryAccepts({ maxPerCell: 2.5 }), false);
+	assert.equal(libraryAccepts({ maxPerCell: 0 }), false);
+	assert.equal(libraryAccepts({ mutationRate: 1.5 }), false);
+	assert.deepEqual(validateSimulationParams({ ...BASE, mutationSize: 3.5 }), { ...BASE, mutationSize: 3.5 });
+	assert.throws(() => validateSimulationParams({ ...BASE, maxPerCell: 2.5 }), /^RangeError: maxPerCell must be a positive integer\.$/);
+	assert.throws(() => validateSimulationParams({ ...BASE, mutationRate: 1.5 }), /^RangeError: mutationRate must be a number from 0 to 1\.$/);
+});
+
+test("a species change keeps species-independent values", () => {
+	const shown = {
+		selectionStrength: "2",
+		mutationRate: "0.1",
+		mutationSize: "0.05",
+		mortalityChance: "0.01",
+		reproductionChance: "0.5",
+		growthRate: "0.4",
+		maintenance: "0.05",
+		maxPerCell: "40",
+		waterRegeneration: "0.1",
+		waterSpread: "0.5",
+		nutrientRegeneration: "0.02",
+		nutrientSpread: "0.05",
+	};
+	assert.deepEqual(refillForSpecies(shown, "evolving", "neutral"), { ...shown, selectionStrength: 0, mutationRate: 0 });
+	assert.deepEqual(refillForSpecies({ ...shown, selectionStrength: "0", mutationRate: "0" }, "neutral", "evolving"), {
+		...shown,
+		selectionStrength: 2,
+		mutationRate: 0.1,
+	});
+	assert.deepEqual(refillForSpecies({ ...shown, selectionStrength: "1.5" }, "evolving", "evolving"), { ...shown, selectionStrength: "1.5" });
+});

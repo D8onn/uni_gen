@@ -8,9 +8,10 @@ const SNAPSHOT_INTERVAL_MS = 100;
 const RATE_WINDOW_MS = 1000;
 
 /**
- * Handles `world` {input}, `configure` {params}, `reset`, `play`, `pause`, `step` {ticks}, `speed` {ticksPerSecond}, and
+ * Handles `world` {input}, `configure` {params, requestId}, `reset`, `play`, `pause`, `step` {ticks}, `speed` {ticksPerSecond}, and
  * `inspect` {cellId} (a cell id, or null to stop) messages.
- * Every outcome is posted back as `snapshot` {params, running, ticksPerSecond, summary, maxPerCell, groups, cells} or `error` {message};  `groups` is `{ regions, occupied, divergence }` (see `getGroupDivergence`); `cells` holds per-cell typed arrays indexed by cell id.
+ * Every outcome is posted back as `snapshot` {params, appliedRequest, running, ticksPerSecond, summary, maxPerCell, groups, cells} or `error` {message, requestId};  `groups` is `{ regions, occupied, divergence }` (see `getGroupDivergence`); `cells` holds per-cell typed arrays indexed by cell id.
+ * `appliedRequest` is the running configure's `requestId`, an error's `requestId` that of the configure it rejects (else null); a rejected configure leaves the run as it was.
  * While a cell is being inspected, each snapshot is followed by a `cell` message with that cell's habitat and organisms (`inspectCell`).
  * `post(message, transferList)` receives the buffers to transfer. `now`, `schedule`, and `cancel` are injectable so tests can drive the clock.
  */
@@ -32,12 +33,13 @@ export function createSimulationController({
 	let rateTicks = 0;
 	let ticksPerSecond = 0;
 	let inspected = null; // the cell whose details follow every snapshot
+	let appliedRequest = null;
 
 	function postSnapshot() {
 		lastPost = now();
 		const { params, summary, maxPerCell, groups, cells } = simulation.snapshot();
 		// The per-cell arrays are fresh copies, so their buffers move to the page without copying.
-		post({ type: "snapshot", params: { ...params, speed }, running, ticksPerSecond, summary, maxPerCell, groups, cells }, Object.values(cells).map((array) => array.buffer));
+		post({ type: "snapshot", params: { ...params, speed }, appliedRequest, running, ticksPerSecond, summary, maxPerCell, groups, cells }, Object.values(cells).map((array) => array.buffer));
 		if (inspected !== null) post({ type: "cell", ...simulation.inspectCell(inspected) });
 	}
 
@@ -91,11 +93,12 @@ export function createSimulationController({
 			configured = false;
 			inspected = null; // a new world may have a different set of cells
 		},
-		configure({ params }) {
-			stop();
+		configure({ params, requestId = null }) {
 			simulation.configure(params);
+			stop();
 			configured = true;
 			speed = params.speed;
+			appliedRequest = requestId;
 		},
 		reset() {
 			requireConfigured();
@@ -144,7 +147,7 @@ export function createSimulationController({
 				if (handler === null) throw new RangeError(`Unknown message type: ${message?.type}.`);
 				handler(message);
 			} catch (error) {
-				post({ type: "error", message: error.message });
+				post({ type: "error", message: error.message, requestId: message?.type === "configure" ? (message.requestId ?? null) : null });
 			}
 			if (configured) postSnapshot();
 		},
