@@ -16,12 +16,12 @@ export function validateStopCondition(stop = "none", stopAt, { founders }) {
 		if (founders === 0) throw new RangeError("stop=extinct needs at least one founder.");
 		return { stop };
 	}
-	const least = stop === "tick" ? 1 : 0;
+	const least = stop === "count-above" ? 0 : 1; // a count is never below 0, so count-below needs 1 or more
 	if (!Number.isSafeInteger(stopAt) || stopAt < least) throw new RangeError(`stopAt must be an integer of ${least} or more when stop is ${stop}.`);
 	return { stop, stopAt };
 }
 
-// Conditions fire only on the tick they become true, so one that already holds (or a tick already passed) is rejected rather than never firing.
+// For a condition set mid-run: it fires only on the tick it becomes true, so one that already holds (or a tick already reached) is rejected rather than silently waiting.
 export function assertStopSettable(stop = "none", stopAt, { tick, count }) {
 	if (stop === "tick" && stopAt <= tick) throw new RangeError(`stopAt ${stopAt} is not after the current tick ${tick}.`);
 	if (stop === "extinct" && count === 0) throw new RangeError("The population is already extinct.");

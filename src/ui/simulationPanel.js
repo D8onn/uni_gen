@@ -4,7 +4,7 @@ import { createApplyTracker } from "./applyTracker.js";
 import { createDisclosure, createHelpDisclosure } from "./helpDisclosure.js";
 import { LIMIT_KINDS } from "../utility/ecology/habitat.js";
 import { getViewLegend } from "../utility/planet/cellViews.js";
-import { needsStopAt } from "../utility/ecology/stopCondition.js";
+import { needsStopAt, validateStopCondition } from "../utility/ecology/stopCondition.js";
 import {
 	ADVANCED_SETTINGS,
 	effectiveSettings,
@@ -81,13 +81,14 @@ export function createSimulationPanel({ client, params, views }) {
 
 	const stopSelect = element(
 		"select",
-		{ title: "stop", style: "width: 92px; box-sizing: border-box; font: inherit;" },
+		{ title: "stop", style: "flex: 1; min-width: 0; box-sizing: border-box; font: inherit;" },
 		Object.entries(STOP_LABELS).map(([value, text]) => element("option", { value, text }))
 	);
-	const stopAtInput = element("input", { type: "number", min: 0, step: 1, title: "stopAt", style: "width: 60px; box-sizing: border-box; font: inherit;" });
-	const stopRow = element("label", { style: FIELD_STYLE }, [
-		element("span", { text: "Stop when" }),
-		element("span", { style: "display: flex; gap: 4px;" }, [stopSelect, stopAtInput]),
+	const stopAtInput = element("input", { type: "number", min: 0, step: 1, title: "stopAt", style: "width: 72px; box-sizing: border-box; font: inherit;" });
+	// The label sits on its own line so the select can take the panel's width beside the limit.
+	const stopRow = element("label", { style: "display: block; margin-bottom: 6px;" }, [
+		element("div", { text: "Stop when", style: "margin-bottom: 2px;" }),
+		element("div", { style: "display: flex; gap: 6px;" }, [stopSelect, stopAtInput]),
 	]);
 
 	const playButton = element("button", { type: "button", text: "Play", style: BUTTON_STYLE });
@@ -256,10 +257,12 @@ export function createSimulationPanel({ client, params, views }) {
 	// A stop-condition change applies at once without a restart; the row keeps what was typed unless the worker rejects it.
 	function sendStop() {
 		const { stop, stopAt } = readStop();
-		if (needsStopAt(stop) && stopAt === undefined) return; // waits for a value rather than sending a condition that cannot be valid
-		message.textContent = "";
-		stopRequestId = tracker.nextRequestId();
-		client.stopWhen(stop, stopAt, stopRequestId);
+		attempt(() => {
+			// A blank limit shows its message and is not sent, so the row keeps the chosen kind while a value is typed.
+			if (needsStopAt(stop) && stopAt === undefined) validateStopCondition(stop, stopAt, tracker.applied());
+			stopRequestId = tracker.nextRequestId();
+			client.stopWhen(stop, stopAt, stopRequestId);
+		});
 	}
 	stopSelect.addEventListener("change", () => {
 		syncStopInput();

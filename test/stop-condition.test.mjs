@@ -91,6 +91,7 @@ test("stop and stopAt parse, validate, and round-trip canonically", () => {
 		["stop=tick&stopAt=", /stopAt must not be empty/],
 		["stop=count-above&stopAt=-1", /stopAt must be an integer of 0 or more/],
 		["stop=count-below&stopAt=2.5", /stopAt must be an integer/],
+		["stop=count-below&stopAt=0", /stopAt must be an integer of 1 or more when stop is count-below/],
 		["stop=extinct&founders=0", /stop=extinct needs at least one founder/],
 	];
 	for (const [query, pattern] of invalid) {
@@ -101,7 +102,8 @@ test("stop and stopAt parse, validate, and round-trip canonically", () => {
 test("the stop condition helpers follow their rules", () => {
 	assert.deepEqual(STOP_KINDS, ["none", "tick", "extinct", "count-above", "count-below"]);
 	assert.deepEqual(validateStopCondition(undefined, undefined, { founders: 5 }), {});
-	assert.deepEqual(validateStopCondition("count-below", 0, { founders: 5 }), { stop: "count-below", stopAt: 0 });
+	assert.deepEqual(validateStopCondition("count-above", 0, { founders: 5 }), { stop: "count-above", stopAt: 0 });
+	assert.throws(() => validateStopCondition("count-below", 0, { founders: 5 }), isRangeError(/stopAt must be an integer of 1 or more when stop is count-below/));
 	assert.equal(stopHolds("none", undefined, { tick: 3, count: 0 }), false);
 	assert.equal(stopHolds("tick", 3, { tick: 3, count: 9 }), true);
 	assert.equal(stopHolds("count-above", 9, { tick: 3, count: 9 }), false);
@@ -198,7 +200,7 @@ test("a spent count condition does not fire again when the count crosses its lim
 	assert.equal(simulation.snapshot().summary.tick, second.tick);
 });
 
-test("a condition that could never fire from the current state is rejected when set", () => {
+test("a condition set mid-run that already holds or names a reached tick is rejected", () => {
 	const simulation = configured(PARAMS);
 	simulation.step(7);
 	assert.throws(() => simulation.setStop("tick", 5), isRangeError(/stopAt 5 is not after the current tick 7/));
@@ -208,7 +210,7 @@ test("a condition that could never fire from the current state is rejected when 
 	assert.throws(() => simulation.setStop("count-above", 100), isRangeError(/The count 106 is already above 100/));
 	assert.throws(() => simulation.setStop("count-below", 107), isRangeError(/The count 106 is already below 107/));
 	assert.throws(() => simulation.setStop("bogus"), isRangeError(/stop must be one of/));
-	assert.throws(() => configured({ ...PARAMS, stop: "count-above", stopAt: 50 }), isRangeError(/The count 60 is already above 50/));
+	assert.throws(() => simulation.setStop("count-below", 0), isRangeError(/stopAt must be an integer of 1 or more when stop is count-below/));
 	const extinct = configured(EXTINCT);
 	extinct.step(150);
 	assert.throws(() => extinct.setStop("extinct"), isRangeError(/already extinct/));
@@ -290,7 +292,16 @@ test("default params carry no stop fields and nothing has stopped or died out at
 	assert.deepEqual(validateSimulationParams(PARAMS), PARAMS);
 });
 
-test("a count condition set mid-run serialises, and its URL gives a configure error rather than a throw", () => {
+test("a run started with a condition that already holds waits for its next crossing", () => {
+	// Seed 7 starts at 60 organisms, falls to 54 by tick 7, and first rises above 55 again at tick 11.
+	const waiting = configured({ ...PARAMS, stop: "count-above", stopAt: 55 });
+	assert.deepEqual(waiting.step(40), { reason: "count", tick: 11 });
+	const neverCrossed = configured({ ...PARAMS, stop: "count-below", stopAt: 70 });
+	assert.equal(neverCrossed.step(30), null);
+	assert.deepEqual(neverCrossed.snapshot().params, { ...PARAMS, stop: "count-below", stopAt: 70 });
+});
+
+test("a count condition set mid-run serialises, and its URL loads and runs", () => {
 	const harness = createHarness();
 	harness.controller.handle({ type: "configure", params: PARAMS });
 	harness.controller.handle({ type: "step", ticks: 18 });
@@ -300,11 +311,89 @@ test("a count condition set mid-run serialises, and its URL gives a configure er
 	const { params } = harness.last("snapshot");
 	const query = toSearchParams(params).toString();
 	assert.equal(query, "seed=7&founders=60&species=evolving&dispersal=0.2&speed=10&stop=count-below&stopAt=70");
-	const loaded = parseSimulationParams(query);
 	const reload = createHarness();
-	reload.controller.handle({ type: "configure", params: loaded });
-	assert.match(reload.last("error").message, /The count 60 is already below 70/);
-	assert.equal(reload.last("snapshot"), undefined);
+	reload.controller.handle({ type: "configure", params: parseSimulationParams(query) });
+	assert.equal(reload.last("error"), undefined);
+	assert.deepEqual(reload.last("snapshot").params, params);
+	reload.controller.handle({ type: "play" });
+	reload.advance(1000);
+	assert.equal(reload.last("snapshot").summary.tick, 10);
+	assert.equal(reload.last("snapshot").running, true);
+	reload.controller.handle({ type: "stopWhen", stop: "none", requestId: 2 });
+	assert.deepEqual(reload.last("snapshot").params, PARAMS);
+});
+
+// A small seeded generator so the randomised test is reproducible.
+function randomFrom(seed) {
+	let state = seed >>> 0;
+	return (n) => {
+		state = (state + 0x6d2b79f5) >>> 0;
+		let t = Math.imul(state ^ (state >>> 15), 1 | state);
+		t ^= t + Math.imul(t ^ (t >>> 7), 61 | t);
+		return Math.floor((((t ^ (t >>> 14)) >>> 0) / 4294967296) * n);
+	};
+}
+
+test("params from any accepted mid-run stop condition always configure, through the URL too, unchanged", () => {
+	const random = randomFrom(2024);
+	const kinds = ["none", "tick", "extinct", "count-above", "count-below"];
+	let accepted = 0;
+	let holdingAtStart = 0;
+	for (let trial = 0; trial < 150; trial++) {
+		const start = { ...PARAMS, founders: 1 + random(120) };
+		const simulation = configured(start);
+		simulation.step(random(60));
+		const { tick, count } = simulation.snapshot().summary;
+		const stop = kinds[random(kinds.length)];
+		const stopAt = stop === "tick" ? tick - 5 + random(40) : stop.startsWith("count") ? Math.max(0, count - 60 + random(120)) : undefined;
+		try {
+			simulation.setStop(stop, stopAt);
+		} catch (error) {
+			assert.ok(error instanceof RangeError, error.message);
+			continue;
+		}
+		accepted += 1;
+		const { params } = simulation.snapshot();
+		if ((stop === "count-above" && start.founders > stopAt) || (stop === "count-below" && start.founders < stopAt)) holdingAtStart += 1;
+		const label = JSON.stringify(params);
+		const loaded = parseSimulationParams(toSearchParams(params).toString());
+		assert.deepEqual(loaded, params, label);
+		for (const input of [params, loaded]) {
+			const restarted = createSimulation();
+			restarted.setWorld(inputFor(start.seed));
+			assert.doesNotThrow(() => restarted.configure(input), label);
+			assert.deepEqual(restarted.snapshot().params, params, label);
+		}
+	}
+	assert.ok(accepted >= 50, `accepted ${accepted}`);
+	assert.ok(holdingAtStart >= 5, `holding at tick 0: ${holdingAtStart}`);
+});
+
+test("Reset, a fresh load of the URL, and Apply of the same params agree", () => {
+	// count-above 55 is valid at tick 7 (54 organisms) but already holds at tick 0 (60), the case a load used to reject.
+	const harness = createHarness();
+	harness.controller.handle({ type: "configure", params: PARAMS, requestId: 1 });
+	harness.controller.handle({ type: "step", ticks: 7 });
+	harness.controller.handle({ type: "stopWhen", stop: "count-above", stopAt: 55, requestId: 2 });
+	const { params } = harness.last("snapshot");
+	assert.deepEqual(params, { ...PARAMS, stop: "count-above", stopAt: 55 });
+	const runs = [];
+	harness.controller.handle({ type: "reset" });
+	harness.controller.handle({ type: "step", ticks: 40 });
+	runs.push(harness.last("snapshot"));
+	const reload = createHarness();
+	reload.controller.handle({ type: "configure", params: parseSimulationParams(toSearchParams(params).toString()) });
+	reload.controller.handle({ type: "step", ticks: 40 });
+	runs.push(reload.last("snapshot"));
+	harness.controller.handle({ type: "configure", params, requestId: 3 });
+	harness.controller.handle({ type: "step", ticks: 40 });
+	runs.push(harness.last("snapshot"));
+	assert.equal(harness.messages.some((message) => message.type === "error") || reload.messages.some((message) => message.type === "error"), false);
+	for (const run of runs) {
+		assert.deepEqual(run.params, params);
+		assert.deepEqual(run.stopped, { reason: "count", tick: 11 });
+		assert.deepEqual([run.summary, run.groups, run.cells], [runs[0].summary, runs[0].groups, runs[0].cells]);
+	}
 });
 
 test("the readme documents stop and stopAt", () => {

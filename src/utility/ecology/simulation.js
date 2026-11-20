@@ -49,10 +49,7 @@ export function createSimulation() {
 		},
 		// Starts a new simulation at tick 0 on the loaded world; the params' seed must be the world's seed.
 		configure(params) {
-			const clean = validateSimulationParams(params);
-			const next = build(clean);
-			assertStopSettable(clean.stop, clean.stopAt, progress(next));
-			state = next;
+			state = build(validateSimulationParams(params)); // a stop condition that already holds at tick 0 waits for its next crossing, so accepted params always load
 		},
 		// Restarts at tick 0 with the same params and re-arms the stop condition.
 		reset() {
@@ -78,7 +75,7 @@ export function createSimulation() {
 			}
 			return null;
 		},
-		// Replaces the stop condition without restarting; throws a RangeError if it is invalid or could never fire from here.
+		// Replaces the stop condition without restarting; throws a RangeError if it is invalid, already holds, or names a tick already reached.
 		setStop(stop, stopAt) {
 			const current = requireState();
 			const condition = validateStopCondition(stop, stopAt, current.params);
