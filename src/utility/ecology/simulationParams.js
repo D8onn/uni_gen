@@ -2,6 +2,7 @@
 import { createRandomSeed } from "../planet/seededRandom.js";
 import { DEFAULT_RESOURCE_RATES, describeLimit, isWithinLimit } from "./habitat.js";
 import { DEFAULT_PRODUCER, EVOLVING_PRODUCER, SPECIES_KINDS } from "./population.js";
+import { validateStopCondition } from "./stopCondition.js";
 
 export const SPECIES_NAMES = ["evolving", "neutral"];
 export const SPECIES_PRESETS = { evolving: EVOLVING_PRODUCER, neutral: {} };
@@ -29,7 +30,7 @@ export const ADVANCED_SETTINGS = [
 	].map(([name, label, resource, rate]) => ({ name, label, group: "habitat", kind: "fraction", path: [resource, rate] })),
 ];
 
-const NUMBER_FIELDS = ["seed", "founders", "dispersal", "speed", ...ADVANCED_SETTINGS.map(({ name }) => name)];
+const NUMBER_FIELDS = ["seed", "founders", "dispersal", "speed", ...ADVANCED_SETTINGS.map(({ name }) => name), "stopAt"];
 
 // The value an advanced setting takes when the params leave it out: the species preset's, or the habitat's default rate.
 export function defaultFor(setting, species) {
@@ -61,6 +62,7 @@ export function validateSimulationParams(params) {
 		if (!isWithinLimit(setting.kind, value)) throw new RangeError(`${setting.name} must ${describeLimit(setting.kind)}.`);
 		if (value !== defaultFor(setting, species)) clean[setting.name] = value;
 	}
+	Object.assign(clean, validateStopCondition(params.stop, params.stopAt, { founders })); // `none`, the default, adds no keys
 	return clean;
 }
 
@@ -75,6 +77,7 @@ export function parseSimulationParams(search, { randomSeed = createRandomSeed } 
 		params[name] = Number(raw);
 	}
 	if (query.has("species")) params.species = query.get("species");
+	if (query.has("stop")) params.stop = query.get("stop");
 	params.seed ??= randomSeed();
 	return validateSimulationParams(params);
 }

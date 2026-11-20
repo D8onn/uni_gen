@@ -4,6 +4,7 @@ import { createApplyTracker } from "./applyTracker.js";
 import { createDisclosure, createHelpDisclosure } from "./helpDisclosure.js";
 import { LIMIT_KINDS } from "../utility/ecology/habitat.js";
 import { getViewLegend } from "../utility/planet/cellViews.js";
+import { needsStopAt, validateStopCondition } from "../utility/ecology/stopCondition.js";
 import {
 	ADVANCED_SETTINGS,
 	effectiveSettings,
@@ -23,6 +24,8 @@ const PANEL_STYLE = `
 const FIELD_STYLE = "display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;";
 const INPUT_STYLE = "width: 110px; box-sizing: border-box; font: inherit;";
 const BUTTON_STYLE = "flex: 1; font: inherit; cursor: pointer;";
+const STOP_LABELS = { none: "none", tick: "at tick", extinct: "extinct", "count-above": "count above", "count-below": "count below" };
+const STOPPED_TEXT = { tick: "target tick reached", extinct: "population extinct", count: "count passed its limit" };
 
 function element(tag, { style, text, ...properties } = {}, children = []) {
 	const node = Object.assign(document.createElement(tag), properties);
@@ -48,6 +51,7 @@ export function createSimulationPanel({ client, params, views }) {
 	let lastUrlQuery = toSearchParams(params).toString(); // the page loads with this URL, so it is not rewritten until it changes
 	let shownSpecies = params.species; // the species whose defaults the advanced fields were last filled from
 	let running = false;
+	let stopRequestId = null; // the latest stop-condition request, whose rejection puts the applied condition back in the row
 
 	const inputs = {
 		seed: element("input", { type: "number", min: 0, max: 0xffffffff, step: 1, style: INPUT_STYLE }),
@@ -74,6 +78,18 @@ export function createSimulationPanel({ client, params, views }) {
 		),
 	];
 	const advanced = createDisclosure({ summary: "Advanced", children: [...advancedGroup("species", "Species"), ...advancedGroup("habitat", "Habitat")] });
+
+	const stopSelect = element(
+		"select",
+		{ title: "stop", style: "flex: 1; min-width: 0; box-sizing: border-box; font: inherit;" },
+		Object.entries(STOP_LABELS).map(([value, text]) => element("option", { value, text }))
+	);
+	const stopAtInput = element("input", { type: "number", min: 0, step: 1, title: "stopAt", style: "width: 72px; box-sizing: border-box; font: inherit;" });
+	// The label sits on its own line so the select can take the panel's width beside the limit.
+	const stopRow = element("label", { style: "display: block; margin-bottom: 6px;" }, [
+		element("div", { text: "Stop when", style: "margin-bottom: 2px;" }),
+		element("div", { style: "display: flex; gap: 6px;" }, [stopSelect, stopAtInput]),
+	]);
 
 	const playButton = element("button", { type: "button", text: "Play", style: BUTTON_STYLE });
 	const stepButton = element("button", { type: "button", text: "Step", style: BUTTON_STYLE });
@@ -138,6 +154,7 @@ export function createSimulationPanel({ client, params, views }) {
 	const form = element("form", { noValidate: true }, [
 		...fields,
 		advanced,
+		stopRow,
 		rows(playButton, stepButton),
 		applyBar,
 		stats,
@@ -158,10 +175,28 @@ export function createSimulationPanel({ client, params, views }) {
 		for (const [name, input] of Object.entries(advancedInputs)) input.value = values[name];
 	}
 
+	function syncStopInput() {
+		stopAtInput.disabled = !needsStopAt(stopSelect.value);
+	}
+
+	function showStop(values) {
+		stopSelect.value = values.stop ?? "none";
+		stopAtInput.value = values.stopAt ?? "";
+		syncStopInput();
+	}
+
 	function showParams(values) {
 		for (const [name, input] of Object.entries(inputs)) input.value = values[name];
 		showAdvanced(effectiveSettings(values));
+		showStop(values);
 		shownSpecies = values.species;
+	}
+
+	// The row's condition; a blank stopAt is left undefined so validation names it.
+	function readStop() {
+		const stop = stopSelect.value;
+		const raw = stopAtInput.value.trim();
+		return { stop, stopAt: needsStopAt(stop) && raw !== "" ? Number(raw) : undefined };
 	}
 
 	function readParams() {
@@ -175,6 +210,7 @@ export function createSimulationPanel({ client, params, views }) {
 			if (value.trim() === "") throw new RangeError(`${label} must not be empty.`);
 			entered[name] = Number(value);
 		}
+		Object.assign(entered, readStop());
 		return validateSimulationParams(entered);
 	}
 
@@ -218,6 +254,21 @@ export function createSimulationPanel({ client, params, views }) {
 	});
 	playButton.addEventListener("click", () => (running ? client.pause() : client.play()));
 	stepButton.addEventListener("click", () => client.step(1));
+	// A stop-condition change applies at once without a restart; the row keeps what was typed unless the worker rejects it.
+	function sendStop() {
+		const { stop, stopAt } = readStop();
+		attempt(() => {
+			// A blank limit shows its message and is not sent, so the row keeps the chosen kind while a value is typed.
+			if (needsStopAt(stop) && stopAt === undefined) validateStopCondition(stop, stopAt, tracker.applied());
+			stopRequestId = tracker.nextRequestId();
+			client.stopWhen(stop, stopAt, stopRequestId);
+		});
+	}
+	stopSelect.addEventListener("change", () => {
+		syncStopInput();
+		sendStop();
+	});
+	stopAtInput.addEventListener("change", sendStop);
 	inputs.speed.addEventListener("change", () =>
 		attempt(() => {
 			const { speed } = validateSimulationParams({ ...tracker.applied(), speed: Number(inputs.speed.value) });
@@ -227,12 +278,14 @@ export function createSimulationPanel({ client, params, views }) {
 		})
 	);
 
-	function render({ running: isRunning, ticksPerSecond, summary, groups }) {
+	function render({ running: isRunning, ticksPerSecond, stopped, extinctTick, summary, groups }) {
 		running = isRunning;
 		playButton.textContent = running ? "Pause" : "Play";
 		const { lastTick, totals } = summary;
 		stats.textContent = [
+			...(extinctTick !== null ? [`Extinct at tick ${extinctTick}`] : []),
 			`Tick        ${summary.tick}${running ? ` (${ticksPerSecond.toFixed(1)}/s)` : ""}`,
+			...(stopped !== null && !running ? [`Stopped at tick ${stopped.tick} (${STOPPED_TEXT[stopped.reason]})`] : []),
 			`Organisms   ${summary.count}`,
 			`Biomass     ${summary.totalBiomass.toFixed(1)}`,
 			`Cells       ${summary.occupiedCells}`,
@@ -253,6 +306,11 @@ export function createSimulationPanel({ client, params, views }) {
 		} else {
 			// The worker rejected the pending Apply, so it keeps the applied settings and so do the inputs.
 			if (event.type === "error" && tracker.failed(event.requestId)) showParams(tracker.applied());
+			// The worker rejected the latest stop condition, so the row shows the one still running.
+			if (event.type === "error" && stopRequestId !== null && event.requestId === stopRequestId) {
+				showStop(tracker.applied());
+				stopRequestId = null;
+			}
 			message.textContent = event.message;
 		}
 	});

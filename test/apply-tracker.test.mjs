@@ -119,3 +119,15 @@ test("the tracker does not change the params it is given", () => {
 	assert.deepEqual(initial, START);
 	assert.deepEqual(next, VALID);
 });
+
+test("stop-condition request ids share the Apply sequence and leave the pending Apply alone", () => {
+	const tracker = createApplyTracker(START);
+	assert.equal(tracker.nextRequestId(), 1);
+	const requestId = tracker.apply(VALID);
+	assert.equal(requestId, 2);
+	assert.equal(tracker.nextRequestId(), 3);
+	assert.deepEqual(tracker.pending(), { requestId, params: VALID });
+	assert.equal(tracker.failed(3), false);
+	assert.deepEqual(tracker.pending(), { requestId, params: VALID });
+	assert.equal(tracker.apply(VALID), 4);
+});

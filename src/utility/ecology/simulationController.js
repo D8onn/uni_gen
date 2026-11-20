@@ -8,10 +8,11 @@ const SNAPSHOT_INTERVAL_MS = 100;
 const RATE_WINDOW_MS = 1000;
 
 /**
- * Handles `world` {input}, `configure` {params, requestId}, `reset`, `play`, `pause`, `step` {ticks}, `speed` {ticksPerSecond}, and
- * `inspect` {cellId} (a cell id, or null to stop) messages.
- * Every outcome is posted back as `snapshot` {params, appliedRequest, running, ticksPerSecond, summary, maxPerCell, groups, cells} or `error` {message, requestId};  `groups` is `{ regions, occupied, divergence }` (see `getGroupDivergence`); `cells` holds per-cell typed arrays indexed by cell id.
- * `appliedRequest` is the running configure's `requestId`, an error's `requestId` that of the configure it rejects (else null); a rejected configure leaves the run as it was.
+ * Handles `world` {input}, `configure` {params, requestId}, `reset`, `play`, `pause`, `step` {ticks}, `speed` {ticksPerSecond},
+ * `stopWhen` {stop, stopAt, requestId} (changes the stop condition without restarting), and `inspect` {cellId} (a cell id, or null to stop) messages.
+ * Every outcome is posted back as `snapshot` {params, appliedRequest, running, ticksPerSecond, stopped, extinctTick, summary, maxPerCell, groups, cells} or `error` {message, requestId};  `groups` is `{ regions, occupied, divergence }` (see `getGroupDivergence`); `cells` holds per-cell typed arrays indexed by cell id.
+ * `stopped` is `{ reason, tick }` when the last step ended on the stop condition (playback then pauses), else null; `extinctTick` is the tick the count first reached 0, or null.
+ * `appliedRequest` is the running configure's `requestId`, an error's `requestId` that of the configure or stopWhen it rejects (else null); a rejected configure leaves the run as it was.
  * While a cell is being inspected, each snapshot is followed by a `cell` message with that cell's habitat and organisms (`inspectCell`).
  * `post(message, transferList)` receives the buffers to transfer. `now`, `schedule`, and `cancel` are injectable so tests can drive the clock.
  */
@@ -37,9 +38,12 @@ export function createSimulationController({
 
 	function postSnapshot() {
 		lastPost = now();
-		const { params, summary, maxPerCell, groups, cells } = simulation.snapshot();
+		const { params, stopped, extinctTick, summary, maxPerCell, groups, cells } = simulation.snapshot();
 		// The per-cell arrays are fresh copies, so their buffers move to the page without copying.
-		post({ type: "snapshot", params: { ...params, speed }, appliedRequest, running, ticksPerSecond, summary, maxPerCell, groups, cells }, Object.values(cells).map((array) => array.buffer));
+		post(
+			{ type: "snapshot", params: { ...params, speed }, appliedRequest, running, ticksPerSecond, stopped, extinctTick, summary, maxPerCell, groups, cells },
+			Object.values(cells).map((array) => array.buffer)
+		);
 		if (inspected !== null) post({ type: "cell", ...simulation.inspectCell(inspected) });
 	}
 
@@ -67,12 +71,19 @@ export function createSimulationController({
 			due = Math.min(due + ((start - lastTime) * speed) / 1000, speed);
 			lastTime = start;
 			let ticks = 0;
+			let halted = null; // the stop record once the stop condition fires
 			while (due >= 1 && now() - start < SLICE_MS) {
-				simulation.step(1);
+				halted = simulation.step(1);
 				due -= 1;
 				ticks += 1;
+				if (halted !== null) break;
 			}
 			countTicks(ticks, now());
+			if (halted !== null) {
+				stop();
+				postSnapshot();
+				return;
+			}
 			if (now() - lastPost >= SNAPSHOT_INTERVAL_MS) postSnapshot();
 			timer = schedule(loop, LOOP_DELAY_MS);
 		} catch (error) {
@@ -138,6 +149,10 @@ export function createSimulationController({
 			}
 			speed = value;
 		},
+		stopWhen({ stop: kind, stopAt }) {
+			requireConfigured();
+			simulation.setStop(kind, stopAt);
+		},
 	};
 
 	return {
@@ -147,7 +162,7 @@ export function createSimulationController({
 				if (handler === null) throw new RangeError(`Unknown message type: ${message?.type}.`);
 				handler(message);
 			} catch (error) {
-				post({ type: "error", message: error.message, requestId: message?.type === "configure" ? (message.requestId ?? null) : null });
+				post({ type: "error", message: error.message, requestId: message?.type === "configure" || message?.type === "stopWhen" ? (message.requestId ?? null) : null });
 			}
 			if (configured) postSnapshot();
 		},
