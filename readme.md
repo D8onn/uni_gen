@@ -136,25 +136,6 @@ Transitions: Water, Mountains, and Beaches come from terrain and may border any 
 
 Simplifications: Taiga stands in for all cold land (there is no tundra or ice), and Grasslands covers both cool steppe and warm savanna.
 
-## Biome Classification
-
-Each cell's biome (`src/utility/planet/biomes.js`) comes from its own terrain and climate, checked in this order. Elevation levels are fractions of the maximum elevation (0.45 render units); temperature and moisture are the indices above.
-
-| Biome | Environmental range |
-| --- | --- |
-| Water | elevation below -0.175 |
-| Mountains | elevation above 0.72 |
-| Beaches | land touching water, elevation below 0.15, temperature at least 0.3 |
-| Taiga | temperature below 0.3 (any moisture) |
-| Forest | moisture at least 0.62 |
-| Desert | temperature at least 0.55, moisture below 0.27 |
-| Chaparral | temperature at least 0.55, moisture 0.27 to 0.45 |
-| Grasslands | everything else: temperature 0.3 to 0.55 with moisture below 0.62, or temperature at least 0.55 with moisture 0.45 to 0.62 |
-
-Transitions: Water, Mountains, and Beaches come from terrain and may border any biome. Two climate biomes may border each other only if their ranges touch: Taiga–Grasslands, Taiga–Forest, Grasslands–Forest, Grasslands–Desert, Grasslands–Chaparral, and Desert–Chaparral. Where a sharp climate change puts any other pair side by side (most often Chaparral next to Forest across a rain shadow or coast), both cells become Grasslands, which borders every biome, as an ecotone. This one refinement pass reads only the unrefined biomes, so it does not depend on cell order; it changes about 2% of cells at 80 cells pole-to-pole. River cells keep their biome and are drawn in their own color; every biome has a color in `planetMeshData.js`.
-
-Simplifications: Taiga stands in for all cold land (there is no tundra or ice), and Grasslands covers both cool steppe and warm savanna.
-
 ## Dispersal and Diversity
 
 Offspring can move to a neighboring cell, so populations spread across connected land and stay apart where water separates them. This models how populations diverge and specialize in different habitats; it is not a speciation model (there is no mating or reproductive isolation).
