@@ -1,5 +1,6 @@
 // Control panel for the browser simulation: settings that mirror the URL, playback buttons, and live statistics.
 import { DIVERGENCE_HELP, groupLines } from "./groupLines.js";
+import { createApplyTracker } from "./applyTracker.js";
 import { createDisclosure, createHelpDisclosure } from "./helpDisclosure.js";
 import { LIMIT_KINDS } from "../utility/ecology/habitat.js";
 import { getViewLegend } from "../utility/planet/cellViews.js";
@@ -8,6 +9,7 @@ import {
 	effectiveSettings,
 	MAX_FOUNDERS,
 	MAX_SPEED,
+	refillForSpecies,
 	SPECIES_NAMES,
 	toSearchParams,
 	validateSimulationParams,
@@ -39,11 +41,12 @@ function sum(values) {
  * is a view controller (`list` of views; `select(id)` applies one and returns its legend; `setShowEmptyLand` sets the region view's option; the organism markers
  * can be shown or hidden, and their size is reported through `onMarkers`).
  * Apply restarts the simulation with the entered settings, which count as applied once the worker reports running them; changing the seed reloads the page
- * because the globe is built for one seed. Reset restarts with the last applied settings.
+ * because the globe is built for one seed. Reset restarts with the last applied settings, or with an Apply still in flight, which the worker runs first.
  */
 export function createSimulationPanel({ client, params, views }) {
-	let applied = params;
-	let pending = null; // settings sent with Apply that the worker has not yet reported running
+	const tracker = createApplyTracker(params);
+	let lastUrlQuery = toSearchParams(params).toString(); // the page loads with this URL, so it is not rewritten until it changes
+	let shownSpecies = params.species; // the species whose defaults the advanced fields were last filled from
 	let running = false;
 
 	const inputs = {
@@ -127,12 +130,16 @@ export function createSimulationPanel({ client, params, views }) {
 		markerNote.textContent = organisms === 0 ? "none" : `${shown} \u00d7 ${unit}`;
 	});
 
+	// Apply and its error stay at the bottom of the panel while the fields above scroll, so Apply is reachable with Advanced open.
+	const applyBar = element("div", { style: "position: sticky; bottom: -12px; background: #07111a; margin: 0 -12px; padding: 6px 12px 12px;" }, [
+		rows(resetButton, applyButton),
+		message,
+	]);
 	const form = element("form", { noValidate: true }, [
 		...fields,
 		advanced,
 		rows(playButton, stepButton),
-		rows(resetButton, applyButton),
-		message,
+		applyBar,
 		stats,
 		createHelpDisclosure({ summary: "Divergence T/M", text: DIVERGENCE_HELP }).node,
 	]);
@@ -154,6 +161,7 @@ export function createSimulationPanel({ client, params, views }) {
 	function showParams(values) {
 		for (const [name, input] of Object.entries(inputs)) input.value = values[name];
 		showAdvanced(effectiveSettings(values));
+		shownSpecies = values.species;
 	}
 
 	function readParams() {
@@ -171,7 +179,10 @@ export function createSimulationPanel({ client, params, views }) {
 	}
 
 	function updateUrl(values) {
-		window.history.replaceState(null, "", `${window.location.pathname}?${toSearchParams(values)}`);
+		const query = toSearchParams(values).toString();
+		if (query === lastUrlQuery) return;
+		lastUrlQuery = query;
+		window.history.replaceState(null, "", `${window.location.pathname}?${query}`);
 	}
 
 	function attempt(action) {
@@ -187,18 +198,21 @@ export function createSimulationPanel({ client, params, views }) {
 		event.preventDefault();
 		attempt(() => {
 			const next = readParams();
-			if (next.seed !== applied.seed) {
+			if (next.seed !== tracker.applied().seed) {
 				window.location.assign(`${window.location.pathname}?${toSearchParams(next)}`);
 				return;
 			}
-			pending = next;
-			client.configure(next);
+			client.configure(next, tracker.apply(next));
 		});
 	});
-	// Choosing a species fills the advanced settings with its defaults, without applying them.
-	inputs.species.addEventListener("change", () => showAdvanced(effectiveSettings({ species: inputs.species.value })));
+	// Choosing a species fills the advanced settings whose default depends on the species with its defaults, without applying them.
+	inputs.species.addEventListener("change", () => {
+		const shown = Object.fromEntries(Object.entries(advancedInputs).map(([name, input]) => [name, input.value]));
+		showAdvanced(refillForSpecies(shown, shownSpecies, inputs.species.value));
+		shownSpecies = inputs.species.value;
+	});
 	resetButton.addEventListener("click", () => {
-		showParams(applied);
+		showParams(tracker.resetTarget());
 		message.textContent = "";
 		client.reset();
 	});
@@ -206,9 +220,9 @@ export function createSimulationPanel({ client, params, views }) {
 	stepButton.addEventListener("click", () => client.step(1));
 	inputs.speed.addEventListener("change", () =>
 		attempt(() => {
-			const { speed } = validateSimulationParams({ ...applied, speed: Number(inputs.speed.value) });
-			applied = { ...applied, speed };
-			updateUrl(applied);
+			const { speed } = validateSimulationParams({ ...tracker.applied(), speed: Number(inputs.speed.value) });
+			tracker.setSpeed(speed);
+			updateUrl(tracker.applied());
 			client.setSpeed(speed);
 		})
 	);
@@ -230,22 +244,15 @@ export function createSimulationPanel({ client, params, views }) {
 
 	showLegend(getViewLegend(viewSelect.value));
 	showViewHelp(viewSelect.value);
-	showParams(applied);
-	const sameSettings = (a, b) => toSearchParams(a).toString() === toSearchParams(b).toString();
+	showParams(tracker.applied());
 	client.subscribe((event) => {
 		if (event.type === "snapshot") {
-			if (pending !== null && sameSettings(pending, event.params)) {
-				applied = pending;
-				pending = null;
-				updateUrl(applied);
-			}
+			if (tracker.snapshot(event)) message.textContent = "";
+			updateUrl(tracker.applied());
 			render(event);
 		} else {
 			// The worker rejected the pending Apply, so it keeps the applied settings and so do the inputs.
-			if (event.type === "error" && pending !== null) {
-				pending = null;
-				showParams(applied);
-			}
+			if (event.type === "error" && tracker.failed(event.requestId)) showParams(tracker.applied());
 			message.textContent = event.message;
 		}
 	});

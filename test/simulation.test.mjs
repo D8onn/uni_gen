@@ -462,3 +462,40 @@ test("each snapshot carries the cells' mean traits, dispersal regions, and how t
 	first.cells.region.fill(-5);
 	assert.ok(simulation.snapshot().cells.region.every((region) => region !== -5), "each snapshot gets its own copy of the regions");
 });
+
+test("a rejected configure leaves a running run running", () => {
+	const harness = createHarness();
+	harness.controller.handle({ type: "configure", params: { ...PARAMS, speed: 20 } });
+	harness.controller.handle({ type: "play" });
+	harness.advance(500);
+	const tick = harness.last("snapshot").summary.tick;
+	assert.ok(tick > 0);
+	harness.controller.handle({ type: "configure", params: { ...PARAMS, founders: -5 }, requestId: 2 });
+	assert.match(harness.last("error").message, /founders must be/);
+	assert.equal(harness.last("error").requestId, 2);
+	assert.equal(harness.last("snapshot").running, true);
+	assert.equal(harness.scheduled, true);
+	harness.advance(500);
+	assert.ok(harness.last("snapshot").summary.tick > tick);
+	harness.controller.handle({ type: "speed", ticksPerSecond: 0, requestId: 3 });
+	assert.match(harness.last("error").message, /speed must be/);
+	assert.equal(harness.last("error").requestId, null);
+});
+
+test("a successful configure stops a running run and reports its request", () => {
+	const harness = createHarness();
+	harness.controller.handle({ type: "configure", params: PARAMS });
+	assert.equal(harness.last("snapshot").appliedRequest, null);
+	harness.controller.handle({ type: "play" });
+	harness.advance(500);
+	harness.controller.handle({ type: "configure", params: { ...PARAMS, founders: 30 }, requestId: 7 });
+	const snapshot = harness.last("snapshot");
+	assert.equal(snapshot.running, false);
+	assert.equal(snapshot.appliedRequest, 7);
+	assert.equal(snapshot.summary.tick, 0);
+	assert.equal(harness.scheduled, false);
+	harness.controller.handle({ type: "configure", params: { ...PARAMS, founders: -5 }, requestId: 8 });
+	assert.equal(harness.last("error").requestId, 8);
+	assert.equal(harness.last("snapshot").appliedRequest, 7);
+	assert.equal(harness.last("snapshot").params.founders, 30);
+});

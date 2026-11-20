@@ -105,3 +105,14 @@ export function resolveRun(params) {
 export function effectiveSettings(params) {
 	return Object.fromEntries(ADVANCED_SETTINGS.map((setting) => [setting.name, params[setting.name] ?? defaultFor(setting, params.species)]));
 }
+
+// The advanced values to show after the species changes: a setting whose default differs between the two species takes the new species' default; the rest keep the values shown.
+export function refillForSpecies(values, fromSpecies, toSpecies) {
+	return Object.fromEntries(
+		ADVANCED_SETTINGS.map((setting) => {
+			const from = defaultFor(setting, fromSpecies);
+			const to = defaultFor(setting, toSpecies);
+			return [setting.name, from === to ? values[setting.name] : to];
+		})
+	);
+}

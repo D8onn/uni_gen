@@ -28,7 +28,7 @@ export function createSimulationClient() {
 			return () => listeners.delete(listener);
 		},
 		setWorld: (input) => worker.postMessage({ type: "world", input }),
-		configure: (params) => worker.postMessage({ type: "configure", params }),
+		configure: (params, requestId) => worker.postMessage({ type: "configure", params, requestId }),
 		reset: () => worker.postMessage({ type: "reset" }),
 		play: () => worker.postMessage({ type: "play" }),
 		pause: () => worker.postMessage({ type: "pause" }),
