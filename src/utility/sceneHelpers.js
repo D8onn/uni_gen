@@ -23,29 +23,3 @@ export function createControls(camera, renderer) {
 
 	return controls;
 }
-
-export function createAxis(scene) {
-	const axesHelper = new THREE.AxesHelper(50);
-	scene.add(axesHelper);
-	const gridHelper = new THREE.GridHelper(50, 50);
-	scene.add(gridHelper);
-	const markerMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
-
-	for (let i = 0; i <= 50; i++) {
-		const marker = new THREE.SphereGeometry(0.1);
-		// x axis ()
-		var obj = new THREE.Mesh(marker, markerMaterial);
-		obj.position.set(i, 0, 0);
-		scene.add(obj);
-		obj = new THREE.Mesh(marker, markerMaterial);
-
-		// y-axis ( up )
-		obj.position.set(0, i, 0);
-		scene.add(obj);
-		obj = new THREE.Mesh(marker, markerMaterial);
-
-		// z-axis (forward)
-		obj.position.set(0, 0, i);
-		scene.add(obj);
-	}
-}
