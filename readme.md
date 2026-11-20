@@ -31,6 +31,10 @@ Settings come from the URL; a missing one takes its default, and an invalid one 
 | `species` | `evolving` (`EVOLVING_PRODUCER`) or `neutral` (`DEFAULT_PRODUCER`, traits never change) | `evolving` | |
 | `dispersal` | `dispersalChance`, the chance an offspring moves to a neighboring land cell | 0.1 | 0 to 1 |
 | `speed` | Ticks per second while playing | 10 | 1 to 200 |
+| `stop` | When the run pauses itself: `none`, `tick` (at tick `stopAt`), `extinct` (when the count reaches 0), `count-above` or `count-below` (when the count passes `stopAt`) | `none` | |
+| `stopAt` | The tick or organism count for `stop`; required for `tick`, `count-above`, and `count-below`, left out otherwise | | 1 or more for `tick`, 0 or more for a count |
+
+The stop condition is checked in the worker after every tick, so the run pauses exactly on the tick it fires, however fast it plays or however many ticks a Step takes. It fires once, on the tick it becomes true (a condition that already holds, or a tick already passed, is rejected when set); Play then continues past it, and Reset, Apply, or a new condition re-arms it. `extinct` needs at least one founder. `stop` and `stopAt` are written to the URL only when a condition is set. Whatever the condition, the panel shows **Extinct at tick N** once the count reaches 0, and **Stopped at tick N** with the reason while a stop condition has paused the run. The **Stop when** row in the panel sets the condition; a change takes effect immediately without a restart, like Ticks/sec.
 
 Advanced settings override one species parameter or habitat rate each (see the Organism Model, Heritable Traits, and Habitat sections). A species parameter's default comes from the chosen `species`:
 

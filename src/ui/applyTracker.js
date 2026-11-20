@@ -6,13 +6,20 @@ export function createApplyTracker(initialParams) {
 	let pending = null; // { requestId, params } for the Apply the worker has not yet reported running
 	let lastRequestId = 0;
 
+	// One id sequence for Apply and stop-condition requests, so an error names exactly the request it rejects.
+	function nextRequestId() {
+		lastRequestId += 1;
+		return lastRequestId;
+	}
+
 	return {
 		applied: () => applied,
 		pending: () => pending,
+		nextRequestId,
 		apply(params) {
-			lastRequestId += 1;
-			pending = { requestId: lastRequestId, params };
-			return lastRequestId;
+			const requestId = nextRequestId();
+			pending = { requestId, params };
+			return requestId;
 		},
 		resetTarget: () => pending?.params ?? applied,
 		setSpeed(speed) {

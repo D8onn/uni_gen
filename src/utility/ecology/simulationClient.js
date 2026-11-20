@@ -35,6 +35,7 @@ export function createSimulationClient() {
 		step: (ticks = 1) => worker.postMessage({ type: "step", ticks }),
 		inspect: (cellId) => worker.postMessage({ type: "inspect", cellId }),
 		setSpeed: (ticksPerSecond) => worker.postMessage({ type: "speed", ticksPerSecond }),
+		stopWhen: (stop, stopAt, requestId) => worker.postMessage({ type: "stopWhen", stop, stopAt, requestId }),
 		terminate: () => worker.terminate(),
 	};
 }
